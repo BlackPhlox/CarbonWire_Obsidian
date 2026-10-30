@@ -27,6 +27,12 @@
 - Paste a curl command into the URL bar and the whole request fills in. Copy any request back out as curl.
 - Start a request in a new tab without saving it, then save it to a collection when you want to keep it
 
+**Azure Key Vault**
+- Sign in with your Microsoft work or school account, in the browser or with a device code
+- Use `{{$keyvault:vault/secret}}` anywhere a variable works, and CarbonWire fetches the value when you send
+- Point an environment variable at a secret, so each environment can read from its own vault
+- Values are kept in memory only, for a few minutes, and never written to your vault or history
+
 **Responses**
 - Status, time and size at a glance, with live progress while connecting, waiting and downloading
 - Pretty-printed, searchable JSON with syntax colouring, and a JSON tree view for large payloads
@@ -75,6 +81,25 @@ Median times on an Intel Core i5-1135G7 laptop with Node 24. Run `npm run bench`
 
 <p align="center"><img src="assets/import.png" alt="Import dialog detecting a Postman collection" width="600"></p>
 
+## Azure Key Vault secrets
+
+1. Open **Settings → CarbonWire → Azure Key Vault** and select **Sign in**, or run **Sign in to Microsoft for Azure Key Vault** from the command palette. Your browser opens; pick your account. If the browser can't come back to Obsidian, select **Use a code instead** and enter the code at microsoft.com/devicelogin.
+2. Reference a secret anywhere a variable works: the URL, headers, body, auth or an environment variable.
+
+| Reference | Reads |
+|---|---|
+| `{{$keyvault:contoso/db-password}}` | The latest `db-password` in the `contoso` vault |
+| `{{$keyvault:contoso/db-password/4f2a…}}` | A specific version |
+| `{{$keyvault:db-password}}` | `db-password` in the default vault from settings |
+| `{{$keyvault:contoso.vault.azure.cn/db-password}}` | A vault in another Azure cloud, by host name |
+| `{{$keyvault:https://contoso.vault.azure.net/secrets/db-password}}` | The secret identifier as the Azure portal shows it |
+
+To use a different vault per environment, give each environment a variable such as `dbPassword: {{$keyvault:contoso-dev/db-password}}` and use `{{dbPassword}}` in your requests. Only the secrets a request actually uses are fetched.
+
+Run **Copy Azure Key Vault secret reference** to pick a secret from a vault's list and copy its reference.
+
+Your account needs the **Key Vault Secrets User** role on the vault (or a *Get* secret access policy; *List* too for the picker). By default CarbonWire signs in as Microsoft's public Azure CLI app, the same one the Azure SDKs use for developer sign-in, so there's nothing to register. If your organization blocks it, register a public client app with the `http://localhost` redirect URI and the Azure Key Vault `user_impersonation` permission, then put its client ID and your tenant in settings.
+
 ## Keyboard shortcuts
 
 | Action | Shortcut |
@@ -83,7 +108,7 @@ Median times on an Intel Core i5-1135G7 laptop with Node 24. Run `npm run bench`
 | Save an unsaved request | `Ctrl/Cmd + S` |
 | Find in the response or body | `Ctrl/Cmd + F` |
 
-Commands in the palette: **Open collections**, **New request**, **Import collection, environment or cURL** and **Send request**. Assign your own hotkeys to any of them.
+Commands in the palette: **Open collections**, **New request**, **Import collection, environment or cURL**, **Send request**, **Sign in to Microsoft for Azure Key Vault**, **Sign out of Microsoft**, **Copy Azure Key Vault secret reference** and **Forget fetched Azure Key Vault secrets**. Assign your own hotkeys to any of them.
 
 ## Settings
 
@@ -95,6 +120,10 @@ Commands in the palette: **Open collections**, **New request**, **Import collect
 | History size | 100 | How many recent requests to keep. Set to 0 to turn history off. |
 | Wrap long lines in responses | On | Wraps long lines instead of scrolling sideways. Also on the response toolbar. |
 | Verify TLS certificates | On | Turn off only for local servers with self-signed certificates. |
+| Tenant | `organizations` | Entra ID tenant ID or domain to sign in to. `organizations` accepts any work or school account. |
+| Client ID | Azure CLI app | App (client) ID used for Microsoft sign-in. |
+| Default vault | Empty | Vault used by `{{$keyvault:secret}}` references that don't name one. |
+| Keep secrets in memory | 5 minutes | How long fetched Key Vault values are reused. 0 fetches on every send. |
 
 ## Install
 
@@ -105,7 +134,9 @@ CarbonWire needs Obsidian 1.11.4 or later, on desktop.
 ## Privacy and network use
 
 - CarbonWire sends requests only to the URLs you enter, and only when you send them. For OAuth 2.0 it also calls the token URL you set, including when you copy a request as curl.
-- There's no telemetry and no account.
+- There's no telemetry and no account. Microsoft sign-in is optional and only used for Azure Key Vault.
+- When you sign in, CarbonWire talks to login.microsoftonline.com and briefly listens on a random localhost port for the browser to return. The sign-in (a refresh token) is kept in Obsidian's secret storage on this device, never in your vault. It's tied to the tenant and client ID in settings; change either and you sign in again.
+- Key Vault is called only when you send or copy a request that uses a `{{$keyvault:...}}` reference, or when you list a vault's secrets. Fetched values stay in memory and are never written to disk.
 - A request body can be a file anywhere on your computer, such as `-F file=@/path/to/report.pdf` in an imported curl command. CarbonWire reads that file only when you send the request, and never writes outside your vault.
 - Secret environment values are kept in Obsidian's secret storage, never in your vault.
 - History, including response bodies up to 1 MB each, stays on this device. Requests are stored as written, so secrets aren't copied into history. Clear it from the History tab or turn it off in settings.

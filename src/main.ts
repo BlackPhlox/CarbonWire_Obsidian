@@ -1,6 +1,8 @@
 import { debounce, Events, FileSystemAdapter, Notice, Plugin, TFile, type TAbstractFile } from "obsidian";
 import type { OAuth2Tokens } from "./core/auth/oauth2";
-import type { HttpRequest } from "./core/model";
+import type { EntraClient, EntraConfig } from "./core/azure/entra";
+import type { KeyVaultClient } from "./core/azure/keyvault";
+import type { DefaultsChain, HttpRequest } from "./core/model";
 import { buildRequest } from "./core/request-builder";
 import { environmentSecretId } from "./core/secrets";
 import type { SendResult } from "./core/sender";
@@ -13,6 +15,7 @@ import { resolveEnvironment } from "./core/variables";
 import { CollectionIndex } from "./obsidian/collection-index";
 import { HistoryStore, type HistoryEntry } from "./obsidian/history";
 import { ItemActions } from "./obsidian/item-actions";
+import { MicrosoftAccount } from "./obsidian/microsoft-account";
 import { ObsidianVaultFiles } from "./obsidian/vault-files";
 import { CarbonWireSettingTab, DEFAULT_SETTINGS, type CarbonWireSettings, type RequestLayout } from "./settings";
 import "./styles.css";
@@ -34,13 +37,17 @@ export default class CarbonWirePlugin extends Plugin {
 	actions!: ItemActions;
 	index!: CollectionIndex;
 	history!: HistoryStore;
+	microsoft!: MicrosoftAccount;
 	private readonly events = new Events();
 	private focusedRoot?: string;
 	private transport?: Transport;
 	private oauth2?: OAuth2Tokens;
+	private entra?: EntraClient;
+	private keyVault?: KeyVaultClient;
 
 	override async onload(): Promise<void> {
 		await this.loadSettings();
+		this.followMicrosoftSettings();
 		this.store = new CollectionStore(new ObsidianVaultFiles(this.app.vault));
 		this.actions = new ItemActions(this.app, this);
 		this.index = new CollectionIndex(this.app, {
@@ -52,6 +59,14 @@ export default class CarbonWirePlugin extends Plugin {
 		});
 		const adapter = this.app.vault.adapter;
 		const vaultKey = adapter instanceof FileSystemAdapter ? adapter.getBasePath() : this.app.vault.getName();
+		this.microsoft = new MicrosoftAccount(this.app, {
+			client: () => this.getEntra(),
+			config: () => this.entraConfig(),
+			changed: () => {
+				this.keyVault?.clear();
+				this.events.trigger("microsoft-account-changed");
+			},
+		});
 		this.history = new HistoryStore(`carbonwire-history:${vaultKey}`, () => this.settings.historySize, () => this.events.trigger("history-changed"));
 
 		registerIcon();
@@ -74,6 +89,36 @@ export default class CarbonWirePlugin extends Plugin {
 			id: "import",
 			name: "Import collection, environment or cURL",
 			callback: () => void this.openImport(),
+		});
+		this.addCommand({
+			id: "microsoft-sign-in",
+			name: "Sign in to Microsoft for Azure Key Vault",
+			callback: () => void this.microsoft.signIn(),
+		});
+		this.addCommand({
+			id: "microsoft-sign-out",
+			name: "Sign out of Microsoft",
+			checkCallback: (checking) => {
+				if (!this.microsoft.isSignedIn()) return false;
+				if (!checking) {
+					this.microsoft.signOut();
+					new Notice("Signed out of Microsoft.");
+				}
+				return true;
+			},
+		});
+		this.addCommand({
+			id: "copy-key-vault-reference",
+			name: "Copy Azure Key Vault secret reference",
+			callback: () => void this.pickKeyVaultSecret(),
+		});
+		this.addCommand({
+			id: "clear-key-vault-cache",
+			name: "Forget fetched Azure Key Vault secrets",
+			callback: () => {
+				this.clearKeyVaultCache();
+				new Notice("Fetched Key Vault secrets were cleared from memory.");
+			},
 		});
 		// Ctrl/Cmd+Enter is bound inside request tabs; this lets users add their own hotkey too.
 		this.addCommand({
@@ -155,6 +200,21 @@ export default class CarbonWirePlugin extends Plugin {
 	async saveSettings(): Promise<void> {
 		await this.saveData(this.settings);
 		void this.history.prune();
+		this.followMicrosoftSettings();
+	}
+
+	private microsoftSettings = "";
+
+	/** A different tenant or client ID needs a new sign-in, and a new cache time applies from now on. */
+	private followMicrosoftSettings(): void {
+		const { microsoftTenant, microsoftClientId, keyVaultCacheMinutes } = this.settings;
+		const current = JSON.stringify([microsoftTenant.trim(), microsoftClientId.trim(), keyVaultCacheMinutes]);
+		if (current === this.microsoftSettings) return;
+		const first = this.microsoftSettings === "";
+		this.microsoftSettings = current;
+		if (first) return;
+		this.keyVault?.clear();
+		this.microsoft.configChanged();
 	}
 
 	/** Collections in the sidebar's sort order. */
@@ -250,6 +310,38 @@ export default class CarbonWirePlugin extends Plugin {
 
 	setSecretFor(environmentPath: string, name: string, value: string): void {
 		this.app.secretStorage.setSecret(environmentSecretId(environmentPath, name), value);
+	}
+
+	onMicrosoftAccountChanged(callback: () => void): () => void {
+		const ref = this.events.on("microsoft-account-changed", callback);
+		return () => this.events.offref(ref);
+	}
+
+	clearKeyVaultCache(): void {
+		this.keyVault?.clear();
+	}
+
+	/** Lists a vault's secrets and copies the chosen one as a {{$keyvault:...}} variable. */
+	async pickKeyVaultSecret(): Promise<void> {
+		const [{ promptText }, { pickKeyVaultSecret }] = await Promise.all([import("./ui/prompt"), import("./ui/keyvault-picker")]);
+		const vault = this.settings.keyVaultDefault.trim() || (await promptText(this.app, "Key Vault name or URL", "contoso", "", "List secrets"));
+		if (!vault) return;
+		try {
+			const keyVault = await this.getKeyVault();
+			const names = await keyVault.listSecrets(vault);
+			if (!names.length) {
+				new Notice(`No secrets you can read were found in ${vault}.`);
+				return;
+			}
+			const name = await pickKeyVaultSecret(this.app, vault, names);
+			if (!name) return;
+			const isDefault = vault === this.settings.keyVaultDefault.trim();
+			const reference = `{{$keyvault:${isDefault ? "" : `${vault}/`}${name}}}`;
+			await navigator.clipboard.writeText(reference);
+			new Notice(`Copied ${reference}. Paste it into a request or an environment variable.`);
+		} catch (e) {
+			new Notice(e instanceof Error ? e.message : String(e));
+		}
 	}
 
 	onCollectionsChanged(callback: (collections: CollectionNode[]) => void): () => void {
@@ -349,7 +441,7 @@ export default class CarbonWirePlugin extends Plugin {
 				this.getTransport(),
 				this.getOAuth2(),
 			]);
-			const { root, context, scope } = await this.scopeFor(path, request, requestScope);
+			const { root, context, scope } = await this.scopeFor(path, request, requestScope, { signal, onProgress });
 			const result = await sendRequest(buildRequest(request, context.chain, scope), {
 				transport,
 				oauth2,
@@ -374,7 +466,7 @@ export default class CarbonWirePlugin extends Plugin {
 	async copyCurl(path: string | undefined, request: HttpRequest): Promise<void> {
 		try {
 			const [{ requestScope, withOAuth2 }, { toCurl }, oauth2] = await Promise.all([import("./core/sender"), import("./core/export/curl"), this.getOAuth2()]);
-			const { root, context, scope } = await this.scopeFor(path, request, requestScope);
+			const { root, context, scope } = await this.scopeFor(path, request, requestScope, {});
 			const resolved = await withOAuth2(buildRequest(request, context.chain, scope), oauth2, { rejectUnauthorized: this.settings.rejectUnauthorized });
 			const adapter = this.app.vault.adapter;
 			const base = adapter instanceof FileSystemAdapter ? adapter.getBasePath() : "";
@@ -398,8 +490,16 @@ export default class CarbonWirePlugin extends Plugin {
 		return () => this.events.offref(ref);
 	}
 
-	/** An unsaved request has no collection, so it gets no collection or folder defaults. */
-	private async scopeFor(path: string | undefined, request: HttpRequest, requestScope: typeof import("./core/sender").requestScope) {
+	/**
+	 * An unsaved request has no collection, so it gets no collection or folder defaults. With
+	 * `keyVault`, {{$keyvault:...}} references are fetched, signing in first if needed.
+	 */
+	private async scopeFor(
+		path: string | undefined,
+		request: HttpRequest,
+		requestScope: typeof import("./core/sender").requestScope,
+		keyVault?: { signal?: AbortSignal; onProgress?: (progress: SendProgress) => void },
+	) {
 		const collection = path === undefined ? undefined : this.collectionFor(path);
 		if (path !== undefined && !collection) throw new Error("This request is no longer inside a collection.");
 		const root = collection?.root ?? "";
@@ -408,7 +508,55 @@ export default class CarbonWirePlugin extends Plugin {
 		const environmentPath = name ? this.environments().find((p) => stem(p) === name) : undefined;
 		const environment = environmentPath ? await this.store.loadEnvironment(environmentPath) : undefined;
 		const variables = resolveEnvironment(environment, (variable) => (environmentPath ? this.secretFor(environmentPath, variable) : null));
-		return { root, context, scope: requestScope(context, request, variables) };
+		const scope = requestScope(context, request, variables);
+		if (!keyVault) return { root, context, scope };
+		return { root, context, scope: await this.withKeyVaultSecrets(scope, request, context.chain, keyVault) };
+	}
+
+	/**
+	 * Adds the value of every {{$keyvault:...}} reference the request uses to the scope, so they
+	 * resolve like any other variable.
+	 */
+	private async withKeyVaultSecrets(
+		scope: ReadonlyMap<string, string>,
+		request: HttpRequest,
+		chain: DefaultsChain,
+		options: { signal?: AbortSignal; onProgress?: (progress: SendProgress) => void },
+	): Promise<ReadonlyMap<string, string>> {
+		const { usedKeyVaultVariables } = await import("./core/azure/keyvault");
+		const names = usedKeyVaultVariables(request, chain, scope);
+		if (!names.size) return scope;
+		options.onProgress?.({ phase: "authorizing" });
+		const keyVault = await this.getKeyVault();
+		const secrets = await keyVault.resolve(names, this.settings.keyVaultDefault, options.signal);
+		return new Map([...scope, ...secrets]);
+	}
+
+	private entraConfig(): EntraConfig {
+		return {
+			tenant: this.settings.microsoftTenant.trim() || DEFAULT_SETTINGS.microsoftTenant,
+			clientId: this.settings.microsoftClientId.trim() || DEFAULT_SETTINGS.microsoftClientId,
+			rejectUnauthorized: this.settings.rejectUnauthorized,
+		};
+	}
+
+	private async getEntra(): Promise<EntraClient> {
+		if (!this.entra) {
+			const { EntraClient } = await import("./core/azure/entra");
+			this.entra = new EntraClient(await this.getTransport(), () => this.entraConfig());
+		}
+		return this.entra;
+	}
+
+	private async getKeyVault(): Promise<KeyVaultClient> {
+		if (!this.keyVault) {
+			const { KeyVaultClient } = await import("./core/azure/keyvault");
+			this.keyVault = new KeyVaultClient(await this.getTransport(), (signal) => this.microsoft.accessToken(signal), () => ({
+				rejectUnauthorized: this.settings.rejectUnauthorized,
+				cacheMs: Math.max(0, this.settings.keyVaultCacheMinutes) * 60_000,
+			}));
+		}
+		return this.keyVault;
 	}
 
 	/** Node's http stack loads on first send rather than at startup. */

@@ -1,4 +1,5 @@
 import { normalizePath, PluginSettingTab, Setting, type App, type SettingDefinitionItem } from "obsidian";
+import { AZURE_CLI_CLIENT_ID } from "./core/azure/entra";
 import type { SortOrder } from "./core/storage/order";
 import type CarbonWirePlugin from "./main";
 
@@ -28,6 +29,14 @@ export interface CarbonWireSettings {
 	collectionOrder: string[];
 	/** Environment names in the order they were dragged to; others follow by name. */
 	environmentOrder: string[];
+	/** Entra ID tenant to sign in to; "organizations" accepts any work or school account. */
+	microsoftTenant: string;
+	/** App (client) ID used to sign in; defaults to Microsoft's public Azure CLI app. */
+	microsoftClientId: string;
+	/** Vault used by {{$keyvault:secret}} references that don't name one. */
+	keyVaultDefault: string;
+	/** Minutes fetched Key Vault values stay in memory; 0 fetches on every send. */
+	keyVaultCacheMinutes: number;
 }
 
 export const DEFAULT_SETTINGS: CarbonWireSettings = {
@@ -42,6 +51,10 @@ export const DEFAULT_SETTINGS: CarbonWireSettings = {
 	sortOrder: "manual",
 	collectionOrder: [],
 	environmentOrder: [],
+	microsoftTenant: "organizations",
+	microsoftClientId: AZURE_CLI_CLIENT_ID,
+	keyVaultDefault: "",
+	keyVaultCacheMinutes: 5,
 };
 
 const TEXT = {
@@ -51,6 +64,11 @@ const TEXT = {
 	wrap: ["Wrap long lines in responses", "Otherwise long lines scroll sideways. Also toggled from the response toolbar."],
 	history: ["History size", "How many recent requests to keep, on this device only. Set to 0 to turn history off."],
 	tls: ["Verify TLS certificates", "Turn off only for local servers with self-signed certificates."],
+	account: ["Microsoft account", "Sign in to read secrets from Azure Key Vault with {{$keyvault:vault/secret}} variables. The sign-in is kept in Obsidian's secret storage on this device."],
+	tenant: ["Tenant", "Directory (tenant) ID or domain, such as contoso.onmicrosoft.com. Use organizations for any work or school account."],
+	clientId: ["Client ID", "Application (client) ID to sign in with. The default is Microsoft's public Azure CLI app, which already has Key Vault access. Use your own app registration if your organization blocks it."],
+	defaultVault: ["Default vault", "Vault name or URL used by {{$keyvault:secret}} when the reference doesn't name a vault."],
+	cache: ["Keep secrets in memory", "In minutes. Fetched values are never written to disk. Set to 0 to fetch on every send."],
 } as const;
 
 export class CarbonWireSettingTab extends PluginSettingTab {
@@ -66,7 +84,32 @@ export class CarbonWireSettingTab extends PluginSettingTab {
 			{ name: TEXT.history[0], desc: TEXT.history[1], control: { type: "number", key: "historySize", min: 0, step: 10 } },
 			{ name: TEXT.wrap[0], desc: TEXT.wrap[1], control: { type: "toggle", key: "wrapResponseLines" } },
 			{ name: TEXT.tls[0], desc: TEXT.tls[1], control: { type: "toggle", key: "rejectUnauthorized" } },
+			{
+				type: "group",
+				heading: "Azure Key Vault",
+				items: [
+					{ name: TEXT.account[0], desc: TEXT.account[1], aliases: ["Entra ID", "Azure AD", "sign in"], render: (setting) => this.renderAccount(setting) },
+					{ name: TEXT.tenant[0], desc: TEXT.tenant[1], control: { type: "text", key: "microsoftTenant", placeholder: DEFAULT_SETTINGS.microsoftTenant } },
+					{ name: TEXT.clientId[0], desc: TEXT.clientId[1], control: { type: "text", key: "microsoftClientId", placeholder: DEFAULT_SETTINGS.microsoftClientId } },
+					{ name: TEXT.defaultVault[0], desc: TEXT.defaultVault[1], control: { type: "text", key: "keyVaultDefault", placeholder: "contoso" } },
+					{ name: TEXT.cache[0], desc: TEXT.cache[1], control: { type: "number", key: "keyVaultCacheMinutes", min: 0, step: 1 } },
+				],
+			},
 		];
+	}
+
+	/** Shows who is signed in, with a sign-in or sign-out button, and follows changes. */
+	private renderAccount(setting: Setting): () => void {
+		const account = this.plugin.microsoft;
+		const paint = () => {
+			const name = account.accountName();
+			setting.setDesc(name ? `Signed in as ${name}. ${TEXT.account[1]}` : TEXT.account[1]);
+			setting.controlEl.empty();
+			if (name) setting.addButton((b) => b.setButtonText("Sign out").onClick(() => account.signOut()));
+			else setting.addButton((b) => b.setButtonText("Sign in").setCta().onClick(() => void account.signIn()));
+		};
+		paint();
+		return this.plugin.onMicrosoftAccountChanged(paint);
 	}
 
 	/** Only used by Obsidian versions before 1.13, which lack declarative settings. */
@@ -112,5 +155,35 @@ export class CarbonWireSettingTab extends PluginSettingTab {
 				await this.plugin.saveSettings();
 			}),
 		);
+
+		new Setting(containerEl).setName("Azure Key Vault").setHeading();
+		this.cleanupAccount?.();
+		this.cleanupAccount = this.renderAccount(new Setting(containerEl).setName(TEXT.account[0]));
+		const text = (label: readonly [string, string], key: "microsoftTenant" | "microsoftClientId" | "keyVaultDefault", placeholder: string) =>
+			new Setting(containerEl).setName(label[0]).setDesc(label[1]).addText((t) =>
+				t.setPlaceholder(placeholder).setValue(settings[key]).onChange(async (value) => {
+					settings[key] = value.trim() || (key === "keyVaultDefault" ? "" : DEFAULT_SETTINGS[key]);
+					await this.plugin.saveSettings();
+				}),
+			);
+		text(TEXT.tenant, "microsoftTenant", DEFAULT_SETTINGS.microsoftTenant);
+		text(TEXT.clientId, "microsoftClientId", DEFAULT_SETTINGS.microsoftClientId);
+		text(TEXT.defaultVault, "keyVaultDefault", "contoso");
+		new Setting(containerEl).setName(TEXT.cache[0]).setDesc(TEXT.cache[1]).addText((t) =>
+			t.setValue(String(settings.keyVaultCacheMinutes)).onChange(async (value) => {
+				const minutes = Number(value);
+				if (!Number.isFinite(minutes) || minutes < 0) return;
+				settings.keyVaultCacheMinutes = minutes;
+				await this.plugin.saveSettings();
+			}),
+		);
+	}
+
+	private cleanupAccount?: () => void;
+
+	override hide(): void {
+		this.cleanupAccount?.();
+		this.cleanupAccount = undefined;
+		super.hide();
 	}
 }

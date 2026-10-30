@@ -76,9 +76,9 @@ const dynamic: Record<string, () => string> = {
 	$randomInt: () => Math.floor(Math.random() * 1001).toString(),
 };
 
-/** True for names that resolve without being defined, such as {{$guid}}. */
+/** True for names that resolve without being defined, such as {{$guid}} or {{$keyvault:vault/secret}}. */
 export function isDynamicVariable(name: string): boolean {
-	return Object.hasOwn(dynamic, name);
+	return Object.hasOwn(dynamic, name) || name.startsWith("$keyvault:");
 }
 
 /** A piece of text that is either literal or a {{variable}} reference. */

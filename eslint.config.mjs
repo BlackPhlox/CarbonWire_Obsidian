@@ -14,7 +14,7 @@ export default tseslint.config(
 			globals: { ...globals.browser, ...globals.node },
 			parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname },
 		},
-		rules: { "obsidianmd/ui/sentence-case": ["warn", { brands: ["CarbonWire"] }] },
+		rules: { "obsidianmd/ui/sentence-case": ["warn", { brands: ["CarbonWire", "Microsoft", "Azure Key Vault", "Key Vault"] }] },
 	},
 	{
 		files: ["tests/**/*.ts"],
