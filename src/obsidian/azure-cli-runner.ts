@@ -25,6 +25,16 @@ function searchPath(): string {
 	return [process.env.PATH ?? "", ...extra].filter(Boolean).join(delimiter);
 }
 
+/**
+ * The child's environment with the wider search path. Windows names the variable "Path" and
+ * treats names case-insensitively, so every spelling of it is replaced rather than duplicated.
+ */
+function childEnv(): NodeJS.ProcessEnv {
+	const env: NodeJS.ProcessEnv = {};
+	for (const [key, value] of Object.entries(process.env)) if (key.toUpperCase() !== "PATH") env[key] = value;
+	return { ...env, PATH: searchPath(), AZURE_CORE_ONLY_SHOW_ERRORS: "true", AZURE_CORE_NO_COLOR: "true" };
+}
+
 const FLATPAK_DENIED = /org\.freedesktop\.Flatpak|Portal call failed|ServiceUnknown|AccessDenied/i;
 const FLATPAK_NOT_FOUND = /Failed to start command|No such file or directory/i;
 
@@ -34,6 +44,8 @@ export function azureCliRunner(path: () => string): CommandRunner {
 		new Promise((resolve) => {
 			const flatpak = inFlatpak();
 			let file = path().trim() || (isWindows ? "az.cmd" : "az");
+			// On Windows az is az.cmd; accept a configured path written without the extension.
+			if (isWindows && !/\.[A-Za-z0-9]+$/.test(file)) file += ".cmd";
 			let argv = [...args];
 			// Node only starts .cmd files through a shell. The arguments are fixed words, a URL and a
 			// checked tenant name, so nothing in them needs escaping.
@@ -47,7 +59,7 @@ export function azureCliRunner(path: () => string): CommandRunner {
 				file,
 				argv,
 				{
-					env: { ...process.env, PATH: searchPath(), AZURE_CORE_ONLY_SHOW_ERRORS: "true", AZURE_CORE_NO_COLOR: "true" },
+					env: childEnv(),
 					timeout: 60_000,
 					maxBuffer: 1_000_000,
 					windowsHide: true,
