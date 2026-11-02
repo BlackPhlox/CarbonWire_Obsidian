@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onDestroy, tick, untrack } from "svelte";
-	import type { Auth, HttpRequest, HttpRequestBody, HttpRequestHeader, HttpRequestParam } from "../core/model";
+	import type { Auth, HttpRequest, HttpRequestBody, HttpRequestHeader, HttpRequestParam, HttpRequestSettings } from "../core/model";
 	import type { SendResult } from "../core/sender";
 	import type { SendProgress } from "../core/transport/types";
 	import type { EnvironmentEntry } from "../main";
@@ -12,6 +12,7 @@
 	import BodyEditor from "./BodyEditor.svelte";
 	import KeyValueTable from "./KeyValueTable.svelte";
 	import ResponsePanel from "./ResponsePanel.svelte";
+	import SettingsEditor from "./SettingsEditor.svelte";
 	import UrlInput from "./UrlInput.svelte";
 	import { provideVariables } from "./variables-context";
 	import { createAutosave } from "./autosave";
@@ -132,7 +133,7 @@
 		name = renamed ?? name;
 		input.value = name;
 	}
-	let tab = $state<"params" | "headers" | "body" | "auth">("params");
+	let tab = $state<"params" | "headers" | "body" | "auth" | "settings">("params");
 	let result = $state.raw<SendResult | undefined>(untrack(() => initialResult));
 	let error = $state<string | undefined>();
 	let sending = $state(false);
@@ -189,6 +190,15 @@
 		http.auth = next;
 		changed();
 	}
+
+	/** Settings left at inherit aren't written, so the file stays as small as before. */
+	function setSettings(next: HttpRequestSettings) {
+		if (Object.keys(next).length) request.settings = next;
+		else delete request.settings;
+		changed();
+	}
+
+	const customSettings = $derived(Object.values(request.settings ?? {}).filter((v) => v !== undefined && v !== "inherit").length);
 
 	export function snapshot(): HttpRequest {
 		return $state.snapshot(request) as HttpRequest;
@@ -334,6 +344,7 @@
 			<button class:is-active={tab === "headers"} onclick={() => (tab = "headers")}>Headers {#if http.headers?.length}<span class="carbonwire-count">{http.headers.length}</span>{/if}</button>
 			<button class:is-active={tab === "body"} onclick={() => (tab = "body")}>Body</button>
 			<button class:is-active={tab === "auth"} onclick={() => (tab = "auth")}>Auth</button>
+			<button class:is-active={tab === "settings"} onclick={() => (tab = "settings")}>Settings {#if customSettings}<span class="carbonwire-count">{customSettings}</span>{/if}</button>
 		</div>
 		<span class="carbonwire-spacer"></span>
 		{#if environment}
@@ -382,8 +393,10 @@
 			<KeyValueTable rows={http.headers ?? []} onchange={setHeaders} create={() => ({ name: "", value: "" })} />
 		{:else if tab === "body"}
 			<BodyEditor bind:this={bodyEditor} body={http.body} onchange={setBody} />
-		{:else}
+		{:else if tab === "auth"}
 			<AuthEditor auth={http.auth} onchange={setAuth} />
+		{:else}
+			<SettingsEditor settings={request.settings} onchange={setSettings} />
 		{/if}
 	</div>
 </div>

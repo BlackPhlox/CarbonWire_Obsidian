@@ -26,6 +26,7 @@
 - Auth: Basic, Bearer token, API key, Digest and OAuth 2.0 (client credentials and password)
 - Paste a curl command into the URL bar and the whole request fills in. Copy any request back out as curl.
 - Start a request in a new tab without saving it, then save it to a collection when you want to keep it
+- Per-request settings for timeout, following redirects, URL encoding and keeping the Authorization header on cross-host redirects, inherited from folders and the collection
 
 **Responses**
 - Status, time and size at a glance, with live progress while connecting, waiting and downloading
@@ -113,7 +114,7 @@ CarbonWire needs Obsidian 1.11.4 or later, on desktop.
 
 ## Coming next
 
-- [ ] Request settings: timeout, redirects and URL encoding
+- [x] Request settings: timeout, redirects and URL encoding
 - [ ] Export to Postman and OpenCollection
 - [ ] GraphQL
 - [ ] gRPC

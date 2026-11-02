@@ -1,9 +1,10 @@
 <script lang="ts">
 	import { onDestroy, untrack } from "svelte";
-	import type { Auth, HttpRequestHeader, RequestDefaults, Variable } from "../core/model";
+	import type { Auth, HttpRequestHeader, HttpRequestSettings, RequestDefaults, Variable } from "../core/model";
 	import { variableValue, withValue } from "../core/variables";
 	import AuthEditor from "./AuthEditor.svelte";
 	import KeyValueTable from "./KeyValueTable.svelte";
+	import SettingsEditor from "./SettingsEditor.svelte";
 	import { createAutosave } from "./autosave";
 
 	type Doc = { info?: { name?: string }; request?: RequestDefaults };
@@ -21,7 +22,7 @@
 	const loaded = structuredClone(untrack(() => initial));
 	loaded.request ??= {};
 	let doc = $state(loaded);
-	let tab = $state<"variables" | "headers" | "auth">("variables");
+	let tab = $state<"variables" | "headers" | "auth" | "settings">("variables");
 	const defaults = $derived(doc.request!);
 	const autosave = createAutosave(() => onSave($state.snapshot(doc) as Doc));
 
@@ -34,6 +35,15 @@
 
 	function setHeaders(rows: HttpRequestHeader[]) {
 		defaults.headers = rows;
+		autosave.schedule();
+	}
+
+	function setSettings(http: HttpRequestSettings) {
+		const rest = { ...defaults.settings };
+		delete rest.http;
+		const next = Object.keys(http).length ? { ...rest, http } : rest;
+		if (Object.keys(next).length) defaults.settings = next;
+		else delete defaults.settings;
 		autosave.schedule();
 	}
 
@@ -51,13 +61,14 @@
 	</div>
 	<p class="carbonwire-muted">
 		{kind === "collection"
-			? "Variables, headers and auth here apply to every request in the collection."
-			: "Variables, headers and auth here apply to every request in this folder and override the collection's."}
+			? "Variables, headers, auth and settings here apply to every request in the collection."
+			: "Variables, headers, auth and settings here apply to every request in this folder and override the collection's."}
 	</p>
 	<div class="carbonwire-tabs">
 		<button class:is-active={tab === "variables"} onclick={() => (tab = "variables")}>Variables</button>
 		<button class:is-active={tab === "headers"} onclick={() => (tab = "headers")}>Headers</button>
 		<button class:is-active={tab === "auth"} onclick={() => (tab = "auth")}>Auth</button>
+		<button class:is-active={tab === "settings"} onclick={() => (tab = "settings")}>Settings</button>
 	</div>
 	<div class="carbonwire-request-content">
 		{#if tab === "variables"}
@@ -70,8 +81,10 @@
 			/>
 		{:else if tab === "headers"}
 			<KeyValueTable rows={defaults.headers ?? []} onchange={setHeaders} create={() => ({ name: "", value: "" })} />
-		{:else}
+		{:else if tab === "auth"}
 			<AuthEditor auth={defaults.auth} onchange={setAuth} canInherit={kind === "folder"} />
+		{:else}
+			<SettingsEditor settings={defaults.settings?.http} onchange={setSettings} canInherit={kind === "folder"} />
 		{/if}
 	</div>
 </div>
