@@ -37,6 +37,7 @@
 - Collections and folders share variables, headers and auth with every request inside them
 - One list of environments, one active at a time, each with its own colour. Names like dev, test, staging and prod get matching colours automatically.
 - Drag to reorder or move requests, folders, collections and environments. Sort by name, creation or last update.
+- Export a collection or folder as an OpenAPI 3.1 document, in YAML or JSON
 
 **History**
 - Every request you send is kept with its response, saved or not
@@ -75,6 +76,23 @@ Median times on an Intel Core i5-1135G7 laptop with Node 24. Run `npm run bench`
 
 <p align="center"><img src="assets/import.png" alt="Import dialog detecting a Postman collection" width="600"></p>
 
+## Export to OpenAPI
+
+Right-click a collection or folder and select **Export as OpenAPI…**, or run **Export collection as OpenAPI** for the collection you're working in. Copy the document, save it in your vault, or download it anywhere on your computer, as YAML or JSON.
+
+| From CarbonWire | In OpenAPI |
+|---|---|
+| Requests | Operations, with the request name as summary and its docs as description |
+| Folders | Tags, with folder docs as tag descriptions |
+| URL host, or a leading `{{baseUrl}}` | Servers. Variables become server variables, filled in from the collection and active environment |
+| `:id` and `{{id}}` in the path | Path parameters |
+| Query parameters and headers, inherited ones included | Parameters, with literal values as examples |
+| JSON, XML, text, form and multipart bodies | Request bodies with an inferred schema; body variants become named examples |
+| Saved response examples | Responses with an inferred schema |
+| Basic, Bearer, Digest, API key and OAuth 2.0 auth | Security schemes |
+
+Nothing secret goes into the document: `{{variables}}` aren't resolved into examples, secret environment values are never read, and auth is described without credentials. Requests that OpenAPI can't describe, such as two with the same method and path, are listed in the export dialog.
+
 ## Keyboard shortcuts
 
 | Action | Shortcut |
@@ -83,7 +101,7 @@ Median times on an Intel Core i5-1135G7 laptop with Node 24. Run `npm run bench`
 | Save an unsaved request | `Ctrl/Cmd + S` |
 | Find in the response or body | `Ctrl/Cmd + F` |
 
-Commands in the palette: **Open collections**, **New request**, **Import collection, environment or cURL** and **Send request**. Assign your own hotkeys to any of them.
+Commands in the palette: **Open collections**, **New request**, **Import collection, environment or cURL**, **Send request** and **Export collection as OpenAPI**. Assign your own hotkeys to any of them.
 
 ## Settings
 
@@ -114,6 +132,7 @@ CarbonWire needs Obsidian 1.11.4 or later, on desktop.
 ## Coming next
 
 - [ ] Request settings: timeout, redirects and URL encoding
+- [x] Export to OpenAPI
 - [ ] Export to Postman and OpenCollection
 - [ ] GraphQL
 - [ ] gRPC

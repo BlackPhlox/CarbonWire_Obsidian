@@ -5,7 +5,7 @@ import { buildRequest } from "./core/request-builder";
 import { environmentSecretId } from "./core/secrets";
 import type { SendResult } from "./core/sender";
 import { insertKey, type SortOrder } from "./core/storage/order";
-import { dirname, joinPath, stem } from "./core/storage/paths";
+import { dirname, joinPath, safeFileName, stem } from "./core/storage/paths";
 import { CollectionStore } from "./core/storage/store";
 import { compare, isYaml, type CollectionNode } from "./core/storage/tree";
 import type { SendProgress, Transport } from "./core/transport/types";
@@ -74,6 +74,17 @@ export default class CarbonWirePlugin extends Plugin {
 			id: "import",
 			name: "Import collection, environment or cURL",
 			callback: () => void this.openImport(),
+		});
+		this.addCommand({
+			id: "export-openapi",
+			name: "Export collection as OpenAPI",
+			checkCallback: (checking) => {
+				const root = this.focusedCollection();
+				const collection = root === undefined ? undefined : this.collections().find((c) => c.root === root);
+				if (!collection) return false;
+				if (!checking) void this.exportOpenApi(collection.root);
+				return true;
+			},
 		});
 		// Ctrl/Cmd+Enter is bound inside request tabs; this lets users add their own hotkey too.
 		this.addCommand({
@@ -383,6 +394,49 @@ export default class CarbonWirePlugin extends Plugin {
 			new Notice("Copied as cURL.");
 		} catch (e) {
 			new Notice(`Couldn't copy as cURL: ${e instanceof Error ? e.message : String(e)}`);
+		}
+	}
+
+	/**
+	 * Exports a collection, or one of its folders, as an OpenAPI 3.1 document. Server URLs are
+	 * filled in from the active environment's non-secret values only.
+	 */
+	async exportOpenApi(root: string, folderPath?: string): Promise<void> {
+		const collection = this.collections().find((c) => c.root === root);
+		if (!collection) return;
+		try {
+			const [{ toOpenApi }, { loadOpenApiSource }, { OpenApiModal }, { stringify }] = await Promise.all([
+				import("./core/export/openapi"),
+				import("./obsidian/openapi-export"),
+				import("./ui/openapi-modal"),
+				import("yaml"),
+			]);
+			const name = this.activeEnvironment();
+			const environmentPath = name ? this.environments().find((p) => stem(p) === name) : undefined;
+			const environment = environmentPath ? resolveEnvironment(await this.store.loadEnvironment(environmentPath)) : [];
+			const source = await loadOpenApiSource(this.store, { collection, folderPath }, environment);
+			const result = toOpenApi(source);
+			// Next to the collection folder rather than in it, where it would be read as a request.
+			const suggested = joinPath(dirname(root), `${safeFileName(source.title)}.openapi`);
+			new OpenApiModal(this.app, {
+				title: folderPath ? stem(folderPath) : collection.name,
+				result,
+				suggestedPath: suggested,
+				format: this.settings.openApiFormat,
+				stringify: (format) => Promise.resolve(format === "json" ? `${JSON.stringify(result.document, null, 2)}\n` : stringify(result.document, { lineWidth: 0, aliasDuplicateObjects: false })),
+				save: async (path, text) => {
+					if (isYaml(path) && (this.collectionFor(path) || dirname(path) === this.environmentsFolder())) {
+						throw new Error("A YAML file there would show up as a request or environment. Pick a folder outside your collections, or save as JSON.");
+					}
+					await this.store.writeRaw(path, text);
+				},
+				formatChanged: (format) => {
+					this.settings.openApiFormat = format;
+					void this.saveSettings();
+				},
+			}).open();
+		} catch (e) {
+			new Notice(`Couldn't export OpenAPI: ${e instanceof Error ? e.message : String(e)}`);
 		}
 	}
 

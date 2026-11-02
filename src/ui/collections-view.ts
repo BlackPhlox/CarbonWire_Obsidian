@@ -212,6 +212,7 @@ export class CollectionsView extends ItemView {
 				menu.addSeparator();
 				menu.addItem((item) => item.setTitle("Import into collection…").setIcon("import").onClick(() => void plugin.openImport({ collectionRoot: root })));
 				menu.addItem((item) => item.setTitle("Collection settings").setIcon("settings").onClick(() => void plugin.openFile(joinPath(root, COLLECTION_FILE))));
+				menu.addItem((item) => item.setTitle("Export as OpenAPI…").setIcon("file-output").onClick(() => void plugin.exportOpenApi(root)));
 				if (environments.length > 0) {
 					const title = environments.length === 1 ? "Add its environment to the shared list" : `Add its ${environments.length} environments to the shared list`;
 					menu.addItem((item) => item.setTitle(title).setIcon("globe").onClick(() => void actions.copyCollectionEnvironments(environments)));
@@ -229,6 +230,7 @@ export class CollectionsView extends ItemView {
 						await plugin.openFile(await plugin.store.ensureFolderConfig(dir));
 					}),
 				);
+				menu.addItem((item) => item.setTitle("Export as OpenAPI…").setIcon("file-output").onClick(() => void plugin.exportOpenApi(target.collection.root, dir)));
 				menu.addSeparator();
 				menu.addItem((item) => item.setTitle("Delete").setIcon("trash").setWarning(true).onClick(() => void actions.deleteFolder(dir)));
 				break;

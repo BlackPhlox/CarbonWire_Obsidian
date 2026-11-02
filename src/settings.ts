@@ -28,6 +28,8 @@ export interface CarbonWireSettings {
 	collectionOrder: string[];
 	/** Environment names in the order they were dragged to; others follow by name. */
 	environmentOrder: string[];
+	/** Last format chosen when exporting OpenAPI. */
+	openApiFormat: "yaml" | "json";
 }
 
 export const DEFAULT_SETTINGS: CarbonWireSettings = {
@@ -42,6 +44,7 @@ export const DEFAULT_SETTINGS: CarbonWireSettings = {
 	sortOrder: "manual",
 	collectionOrder: [],
 	environmentOrder: [],
+	openApiFormat: "yaml",
 };
 
 const TEXT = {
