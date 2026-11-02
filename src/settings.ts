@@ -1,6 +1,7 @@
 import { normalizePath, PluginSettingTab, Setting, type App, type SettingDefinitionItem } from "obsidian";
 import { AZURE_CLI_CLIENT_ID } from "./core/azure/entra";
 import type { SortOrder } from "./core/storage/order";
+import type { MicrosoftAuthMode } from "./obsidian/microsoft-account";
 import type CarbonWirePlugin from "./main";
 
 export interface RequestLayout {
@@ -29,6 +30,10 @@ export interface CarbonWireSettings {
 	collectionOrder: string[];
 	/** Environment names in the order they were dragged to; others follow by name. */
 	environmentOrder: string[];
+	/** How Key Vault tokens are obtained: CarbonWire's own sign-in, or the Azure CLI's. */
+	microsoftAuthMode: MicrosoftAuthMode;
+	/** Full path to az; empty searches PATH and the usual install folders. */
+	azureCliPath: string;
 	/** Entra ID tenant to sign in to; "organizations" accepts any work or school account. */
 	microsoftTenant: string;
 	/** App (client) ID used to sign in; defaults to Microsoft's public Azure CLI app. */
@@ -51,6 +56,8 @@ export const DEFAULT_SETTINGS: CarbonWireSettings = {
 	sortOrder: "manual",
 	collectionOrder: [],
 	environmentOrder: [],
+	microsoftAuthMode: "browser",
+	azureCliPath: "",
 	microsoftTenant: "organizations",
 	microsoftClientId: AZURE_CLI_CLIENT_ID,
 	keyVaultDefault: "",
@@ -64,12 +71,19 @@ const TEXT = {
 	wrap: ["Wrap long lines in responses", "Otherwise long lines scroll sideways. Also toggled from the response toolbar."],
 	history: ["History size", "How many recent requests to keep, on this device only. Set to 0 to turn history off."],
 	tls: ["Verify TLS certificates", "Turn off only for local servers with self-signed certificates."],
+	authMode: [
+		"Sign in with",
+		"Microsoft sign-in opens your browser and keeps the sign-in in Obsidian's secret storage. Azure CLI uses the account you signed in to with az login, so CarbonWire stores no sign-in at all.",
+	],
+	cliPath: ["Azure CLI path", "Only for the Azure CLI. Leave empty to find az on your PATH and in the usual install folders."],
 	account: ["Microsoft account", "Sign in to read secrets from Azure Key Vault with {{$keyvault:vault/secret}} variables. The sign-in is kept in Obsidian's secret storage on this device."],
-	tenant: ["Tenant", "Directory (tenant) ID or domain, such as contoso.onmicrosoft.com. Use organizations for any work or school account."],
-	clientId: ["Client ID", "Application (client) ID to sign in with. The default is Microsoft's public Azure CLI app, which already has Key Vault access. Use your own app registration if your organization blocks it."],
+	tenant: ["Tenant", "Directory (tenant) ID or domain, such as contoso.onmicrosoft.com. Use organizations for any work or school account, or, with the Azure CLI, for its current tenant."],
+	clientId: ["Client ID", "Only for Microsoft sign-in. Application (client) ID to sign in with. The default is Microsoft's public Azure CLI app, which already has Key Vault access. Use your own app registration if your organization blocks it."],
 	defaultVault: ["Default vault", "Vault name or URL used by {{$keyvault:secret}} when the reference doesn't name a vault."],
 	cache: ["Keep secrets in memory", "In minutes. Fetched values are never written to disk. Set to 0 to fetch on every send."],
 } as const;
+
+const AUTH_MODES: Record<MicrosoftAuthMode, string> = { browser: "Microsoft sign-in", "azure-cli": "Azure CLI (az login)" };
 
 export class CarbonWireSettingTab extends PluginSettingTab {
 	constructor(app: App, private readonly plugin: CarbonWirePlugin) {
@@ -88,7 +102,9 @@ export class CarbonWireSettingTab extends PluginSettingTab {
 				type: "group",
 				heading: "Azure Key Vault",
 				items: [
+					{ name: TEXT.authMode[0], desc: TEXT.authMode[1], aliases: ["az login", "Azure CLI"], control: { type: "dropdown", key: "microsoftAuthMode", options: AUTH_MODES } },
 					{ name: TEXT.account[0], desc: TEXT.account[1], aliases: ["Entra ID", "Azure AD", "sign in"], render: (setting) => this.renderAccount(setting) },
+					{ name: TEXT.cliPath[0], desc: TEXT.cliPath[1], control: { type: "text", key: "azureCliPath", placeholder: "az" } },
 					{ name: TEXT.tenant[0], desc: TEXT.tenant[1], control: { type: "text", key: "microsoftTenant", placeholder: DEFAULT_SETTINGS.microsoftTenant } },
 					{ name: TEXT.clientId[0], desc: TEXT.clientId[1], control: { type: "text", key: "microsoftClientId", placeholder: DEFAULT_SETTINGS.microsoftClientId } },
 					{ name: TEXT.defaultVault[0], desc: TEXT.defaultVault[1], control: { type: "text", key: "keyVaultDefault", placeholder: "contoso" } },
@@ -101,7 +117,26 @@ export class CarbonWireSettingTab extends PluginSettingTab {
 	/** Shows who is signed in, with a sign-in or sign-out button, and follows changes. */
 	private renderAccount(setting: Setting): () => void {
 		const account = this.plugin.microsoft;
+		let checking = 0;
+		const check = async () => {
+			const run = ++checking;
+			setting.setDesc("Asking the Azure CLI…");
+			try {
+				const { user, tenant } = await account.azureCliAccount();
+				if (run !== checking) return;
+				setting.setDesc(`The Azure CLI is signed in${user ? ` as ${user}` : ""}${tenant ? ` (${tenant})` : ""}. CarbonWire uses that account for Key Vault.`);
+			} catch (e) {
+				if (run === checking) setting.setDesc(e instanceof Error ? e.message : String(e));
+			}
+		};
 		const paint = () => {
+			checking++;
+			if (account.usesAzureCli()) {
+				setting.setDesc("Uses the account you signed in to with az login. Check shows which one.");
+				setting.controlEl.empty();
+				setting.addButton((b) => b.setButtonText("Check").onClick(() => void check()));
+				return;
+			}
 			const name = account.accountName();
 			setting.setDesc(name ? `Signed in as ${name}. ${TEXT.account[1]}` : TEXT.account[1]);
 			setting.controlEl.empty();
@@ -157,15 +192,25 @@ export class CarbonWireSettingTab extends PluginSettingTab {
 		);
 
 		new Setting(containerEl).setName("Azure Key Vault").setHeading();
+		new Setting(containerEl).setName(TEXT.authMode[0]).setDesc(TEXT.authMode[1]).addDropdown((d) =>
+			d
+				.addOptions(AUTH_MODES)
+				.setValue(settings.microsoftAuthMode)
+				.onChange(async (value) => {
+					settings.microsoftAuthMode = value as MicrosoftAuthMode;
+					await this.plugin.saveSettings();
+				}),
+		);
 		this.cleanupAccount?.();
 		this.cleanupAccount = this.renderAccount(new Setting(containerEl).setName(TEXT.account[0]));
-		const text = (label: readonly [string, string], key: "microsoftTenant" | "microsoftClientId" | "keyVaultDefault", placeholder: string) =>
+		const text = (label: readonly [string, string], key: "azureCliPath" | "microsoftTenant" | "microsoftClientId" | "keyVaultDefault", placeholder: string) =>
 			new Setting(containerEl).setName(label[0]).setDesc(label[1]).addText((t) =>
 				t.setPlaceholder(placeholder).setValue(settings[key]).onChange(async (value) => {
-					settings[key] = value.trim() || (key === "keyVaultDefault" ? "" : DEFAULT_SETTINGS[key]);
+					settings[key] = value.trim() || DEFAULT_SETTINGS[key];
 					await this.plugin.saveSettings();
 				}),
 			);
+		text(TEXT.cliPath, "azureCliPath", "az");
 		text(TEXT.tenant, "microsoftTenant", DEFAULT_SETTINGS.microsoftTenant);
 		text(TEXT.clientId, "microsoftClientId", DEFAULT_SETTINGS.microsoftClientId);
 		text(TEXT.defaultVault, "keyVaultDefault", "contoso");

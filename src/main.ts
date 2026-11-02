@@ -15,6 +15,8 @@ import { resolveEnvironment } from "./core/variables";
 import { CollectionIndex } from "./obsidian/collection-index";
 import { HistoryStore, type HistoryEntry } from "./obsidian/history";
 import { ItemActions } from "./obsidian/item-actions";
+import { AzureCliCredential } from "./core/azure/cli";
+import { azureCliRunner } from "./obsidian/azure-cli-runner";
 import { MicrosoftAccount } from "./obsidian/microsoft-account";
 import { ObsidianVaultFiles } from "./obsidian/vault-files";
 import { CarbonWireSettingTab, DEFAULT_SETTINGS, type CarbonWireSettings, type RequestLayout } from "./settings";
@@ -44,6 +46,7 @@ export default class CarbonWirePlugin extends Plugin {
 	private oauth2?: OAuth2Tokens;
 	private entra?: EntraClient;
 	private keyVault?: KeyVaultClient;
+	private azureCli?: AzureCliCredential;
 
 	override async onload(): Promise<void> {
 		await this.loadSettings();
@@ -62,6 +65,8 @@ export default class CarbonWirePlugin extends Plugin {
 		this.microsoft = new MicrosoftAccount(this.app, {
 			client: () => this.getEntra(),
 			config: () => this.entraConfig(),
+			mode: () => this.settings.microsoftAuthMode,
+			cli: () => (this.azureCli ??= new AzureCliCredential(azureCliRunner(() => this.settings.azureCliPath))),
 			changed: () => {
 				this.keyVault?.clear();
 				this.events.trigger("microsoft-account-changed");
@@ -93,7 +98,7 @@ export default class CarbonWirePlugin extends Plugin {
 		this.addCommand({
 			id: "microsoft-sign-in",
 			name: "Sign in to Microsoft for Azure Key Vault",
-			callback: () => void this.microsoft.signIn(),
+			callback: () => void this.signInOrCheckCli(),
 		});
 		this.addCommand({
 			id: "microsoft-sign-out",
@@ -200,15 +205,23 @@ export default class CarbonWirePlugin extends Plugin {
 	async saveSettings(): Promise<void> {
 		await this.saveData(this.settings);
 		void this.history.prune();
+	}
+
+	/** Settings controls on Obsidian 1.13+ save through here without saveSettings. */
+	override async saveData(data: unknown): Promise<void> {
+		await super.saveData(data);
 		this.followMicrosoftSettings();
 	}
 
 	private microsoftSettings = "";
 
-	/** A different tenant or client ID needs a new sign-in, and a new cache time applies from now on. */
+	/**
+	 * Another sign-in method, tenant or client ID needs a new token, and a new cache time applies
+	 * from now on.
+	 */
 	private followMicrosoftSettings(): void {
-		const { microsoftTenant, microsoftClientId, keyVaultCacheMinutes } = this.settings;
-		const current = JSON.stringify([microsoftTenant.trim(), microsoftClientId.trim(), keyVaultCacheMinutes]);
+		const { microsoftAuthMode, azureCliPath, microsoftTenant, microsoftClientId, keyVaultCacheMinutes } = this.settings;
+		const current = JSON.stringify([microsoftAuthMode, azureCliPath.trim(), microsoftTenant.trim(), microsoftClientId.trim(), keyVaultCacheMinutes]);
 		if (current === this.microsoftSettings) return;
 		const first = this.microsoftSettings === "";
 		this.microsoftSettings = current;
@@ -310,6 +323,20 @@ export default class CarbonWirePlugin extends Plugin {
 
 	setSecretFor(environmentPath: string, name: string, value: string): void {
 		this.app.secretStorage.setSecret(environmentSecretId(environmentPath, name), value);
+	}
+
+	/** With the Azure CLI there's nothing to sign in to here, so say which account az will use. */
+	private async signInOrCheckCli(): Promise<void> {
+		if (!this.microsoft.usesAzureCli()) {
+			await this.microsoft.signIn();
+			return;
+		}
+		try {
+			const { user } = await this.microsoft.azureCliAccount();
+			new Notice(`CarbonWire uses the Azure CLI's sign-in${user ? `, ${user}` : ""}. To change it, run az login in a terminal.`);
+		} catch (e) {
+			new Notice(e instanceof Error ? e.message : String(e));
+		}
 	}
 
 	onMicrosoftAccountChanged(callback: () => void): () => void {

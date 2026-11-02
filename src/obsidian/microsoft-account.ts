@@ -1,4 +1,5 @@
 import type { App } from "obsidian";
+import type { AzureCliCredential, CliAccount } from "../core/azure/cli";
 import { accountName, EntraError, KEY_VAULT_SCOPE, signInScope, type EntraClient, type EntraConfig, type EntraTokens } from "../core/azure/entra";
 
 /** One SecretStorage entry holds the whole sign-in, so it stays on this device and out of the vault. */
@@ -12,14 +13,19 @@ interface StoredAccount {
 	refreshToken: string;
 }
 
+/** "browser": CarbonWire signs in itself. "azure-cli": tokens come from the user's `az login`. */
+export type MicrosoftAuthMode = "browser" | "azure-cli";
+
 export interface MicrosoftAccountDeps {
 	client: () => Promise<EntraClient>;
 	config: () => EntraConfig;
+	mode: () => MicrosoftAuthMode;
+	cli: () => AzureCliCredential;
 	/** Called after signing in or out, so settings can refresh. */
 	changed: () => void;
 }
 
-/** The signed-in Microsoft account and its Key Vault access token. */
+/** The signed-in Microsoft account, or the Azure CLI's, and its Key Vault access token. */
 export class MicrosoftAccount {
 	/** `config` is the tenant and client ID the token was issued for. */
 	private access?: { token: string; expiresAt: number; config: string };
@@ -45,7 +51,16 @@ export class MicrosoftAccount {
 
 	private configKey(): string {
 		const config = this.deps.config();
-		return `${config.tenant.trim()}\n${config.clientId.trim()}`;
+		return `${this.deps.mode()}\n${config.tenant.trim()}\n${config.clientId.trim()}`;
+	}
+
+	usesAzureCli(): boolean {
+		return this.deps.mode() === "azure-cli";
+	}
+
+	/** Who the Azure CLI is signed in as; rejects with a message saying what to do when it can't tell. */
+	azureCliAccount(signal?: AbortSignal): Promise<CliAccount> {
+		return this.deps.cli().account(signal);
 	}
 
 	/** The in-memory token, if it is still valid and for the current settings. */
@@ -55,7 +70,9 @@ export class MicrosoftAccount {
 		return access.token;
 	}
 
+	/** In Azure CLI mode this is about CarbonWire's own sign-in, which isn't used. */
 	isSignedIn(): boolean {
+		if (this.usesAzureCli()) return false;
 		return this.stored() !== undefined || this.currentAccess() !== undefined;
 	}
 
@@ -90,8 +107,16 @@ export class MicrosoftAccount {
 	accessToken(signal?: AbortSignal, interactive = true): Promise<string> {
 		const token = this.currentAccess(EXPIRY_SKEW_MS);
 		if (token) return Promise.resolve(token);
-		this.pending ??= this.fetchToken(signal, interactive).finally(() => (this.pending = undefined));
+		this.pending ??= (this.usesAzureCli() ? this.fetchCliToken(signal) : this.fetchToken(signal, interactive)).finally(() => (this.pending = undefined));
 		return this.pending;
+	}
+
+	/** az caches and refreshes its own tokens; CarbonWire only keeps the access token in memory. */
+	private async fetchCliToken(signal: AbortSignal | undefined): Promise<string> {
+		const key = this.configKey();
+		const token = await this.deps.cli().token(KEY_VAULT_SCOPE, this.deps.config().tenant, signal);
+		this.access = { token: token.accessToken, expiresAt: token.expiresAt, config: key };
+		return token.accessToken;
 	}
 
 	private async fetchToken(signal: AbortSignal | undefined, interactive: boolean): Promise<string> {
