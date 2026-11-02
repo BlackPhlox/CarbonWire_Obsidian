@@ -63,20 +63,27 @@ export function parseCliAccount(stdout: string): CliAccount {
 	}
 }
 
-function failure(result: { stderr: string; code: number | null; error?: string }): AzureCliError {
+function failure(result: { stdout: string; stderr: string; code: number | null; error?: string }): AzureCliError {
 	if (result.code === null) {
 		return new AzureCliError(
 			`Couldn't run the Azure CLI${result.error ? ` (${result.error})` : ""}. Install it, or set its full path in CarbonWire settings.`,
 			"not_found",
 		);
 	}
-	const stderr = result.stderr.trim();
-	if (/az login|not logged in|no subscription found|refresh token has expired|AADSTS(50173|70043|700082)/i.test(stderr)) {
+	// Some failures, such as az.cmd not finding its python, are only printed to stdout.
+	const output = result.stderr.trim() || result.stdout.trim();
+	if (/is not recognized as an internal or external command|command not found/i.test(output)) {
+		return new AzureCliError("Couldn't find the Azure CLI. Install it, or set its full path in CarbonWire settings.", "not_found");
+	}
+	if (/az login|not logged in|no subscription found|refresh token has expired|AADSTS(50173|70043|700082)/i.test(output)) {
 		return new AzureCliError("The Azure CLI isn't signed in, or its sign-in expired. Run `az login` in a terminal, then try again.", "not_logged_in");
 	}
 	// az prints "ERROR: <message>" followed by hints; the first line is what matters.
-	const first = stderr.split(/\r?\n/).find((l) => l.trim()) ?? `exit code ${result.code}`;
-	return new AzureCliError(`The Azure CLI failed: ${first.replace(/^ERROR:\s*/, "")}`, "failed");
+	const first = output.split(/\r?\n/).find((l) => l.trim())?.replace(/^ERROR:\s*/, "");
+	return new AzureCliError(
+		first ? `The Azure CLI failed (exit code ${result.code}): ${first}` : `The Azure CLI exited with code ${result.code} without saying why. Check that \`az account get-access-token\` works in a terminal.`,
+		"failed",
+	);
 }
 
 /** Gets tokens from the user's own `az login`, so CarbonWire never handles a sign-in or refresh token. */

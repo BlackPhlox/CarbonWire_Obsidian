@@ -5,7 +5,7 @@ import type { App } from "obsidian";
 import { describe, expect, it, vi } from "vitest";
 import { AzureCliCredential, parseCliAccount, parseCliToken, tokenArgs, type CommandRunner } from "../src/core/azure/cli";
 import { AZURE_CLI_CLIENT_ID, KEY_VAULT_SCOPE, type EntraClient } from "../src/core/azure/entra";
-import { azureCliRunner } from "../src/obsidian/azure-cli-runner";
+import { azureCliRunner, planLaunch, searchDirs } from "../src/obsidian/azure-cli-runner";
 import { MicrosoftAccount, type MicrosoftAuthMode } from "../src/obsidian/microsoft-account";
 
 describe("Azure CLI arguments and output", () => {
@@ -35,7 +35,10 @@ describe("Azure CLI arguments and output", () => {
 		const run = (result: Awaited<ReturnType<CommandRunner>>): CommandRunner => () => Promise.resolve(result);
 		await expect(new AzureCliCredential(run({ stdout: "", stderr: "", code: null, error: "ENOENT" })).token(KEY_VAULT_SCOPE, "")).rejects.toThrow("Couldn't run the Azure CLI (ENOENT)");
 		await expect(new AzureCliCredential(run({ stdout: "", stderr: "ERROR: Please run 'az login' to setup account.", code: 1 })).token(KEY_VAULT_SCOPE, "")).rejects.toThrow("Run `az login`");
-		await expect(new AzureCliCredential(run({ stdout: "", stderr: "ERROR: Tenant 'x' not found.\nCheck your tenant.", code: 1 })).account()).rejects.toThrow("The Azure CLI failed: Tenant 'x' not found.");
+		await expect(new AzureCliCredential(run({ stdout: "", stderr: "ERROR: Tenant 'x' not found.\nCheck your tenant.", code: 1 })).account()).rejects.toThrow("The Azure CLI failed (exit code 1): Tenant 'x' not found.");
+		await expect(new AzureCliCredential(run({ stdout: "Failed to load python executable.\r\n", stderr: "", code: 1 })).account()).rejects.toThrow("(exit code 1): Failed to load python executable.");
+		await expect(new AzureCliCredential(run({ stdout: "", stderr: "", code: 1 })).account()).rejects.toThrow("exited with code 1 without saying why");
+		await expect(new AzureCliCredential(run({ stdout: "", stderr: "'az.cmd' is not recognized as an internal or external command,", code: 1 })).account()).rejects.toThrow("Couldn't find the Azure CLI");
 	});
 });
 
@@ -53,6 +56,34 @@ describe("azureCliRunner", () => {
 
 	it("reports a missing CLI", async () => {
 		await expect(new AzureCliCredential(azureCliRunner(() => join(dir, "missing-az"))).token(KEY_VAULT_SCOPE, "")).rejects.toThrow("Couldn't run the Azure CLI");
+	});
+});
+
+describe("planLaunch", () => {
+	const args = ["account", "show"];
+	const wbin = "C:\\Program Files\\Microsoft SDKs\\Azure\\CLI2\\wbin";
+	const installed = new Set([`${wbin}\\az.cmd`, "C:\\Program Files\\Microsoft SDKs\\Azure\\CLI2\\python.exe"]);
+
+	it("starts the Windows installer's python directly instead of az.cmd", () => {
+		const dirs = searchDirs("win32", { Path: "C:\\Windows\\system32", ProgramFiles: "C:\\Program Files" }, "C:\\Users\\ada");
+		expect(dirs).toContain(wbin);
+		expect(planLaunch("win32", "", args, dirs, (f) => installed.has(f))).toEqual({
+			file: "C:\\Program Files\\Microsoft SDKs\\Azure\\CLI2\\python.exe",
+			args: ["-IBm", "azure.cli", "account", "show"],
+			shell: false,
+		});
+		expect(planLaunch("win32", `${wbin}\\az`, args, [], (f) => installed.has(f)).args[0]).toBe("-IBm");
+	});
+
+	it("falls back to az.cmd by its full path through cmd.exe", () => {
+		expect(planLaunch("win32", "D:\\tools\\az.cmd", args, [], () => false)).toEqual({ file: '"D:\\tools\\az.cmd"', args, shell: true });
+		expect(planLaunch("win32", "", args, ["D:\\bin"], (f) => f === "D:\\bin\\az.cmd")).toEqual({ file: '"D:\\bin\\az.cmd"', args, shell: true });
+	});
+
+	it("finds az in the usual places elsewhere", () => {
+		const dirs = searchDirs("darwin", { PATH: "/usr/bin" }, "/Users/ada");
+		expect(planLaunch("darwin", "", args, dirs, (f) => f === "/opt/homebrew/bin/az")).toEqual({ file: "/opt/homebrew/bin/az", args, shell: false });
+		expect(planLaunch("linux", "", args, ["/usr/bin"], () => false).file).toBe("az");
 	});
 });
 
