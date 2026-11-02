@@ -1,5 +1,7 @@
 <script lang="ts">
+	import { Menu } from "obsidian";
 	import { onDestroy, tick, untrack } from "svelte";
+	import { SNIPPETS, type SnippetLanguage } from "../core/export/snippets";
 	import type { Auth, HttpRequest, HttpRequestBody, HttpRequestHeader, HttpRequestParam } from "../core/model";
 	import type { SendResult } from "../core/sender";
 	import type { SendProgress } from "../core/transport/types";
@@ -241,9 +243,17 @@
 		}
 	}
 
-	async function copyCurl() {
+	async function copySnippet(language: SnippetLanguage) {
 		await autosave.flush();
-		await controller.copyCurl(snapshot());
+		await controller.copySnippet(snapshot(), language);
+	}
+
+	function showCopyMenu(e: MouseEvent) {
+		const menu = new Menu();
+		for (const [language, { label }] of Object.entries(SNIPPETS) as [SnippetLanguage, (typeof SNIPPETS)[SnippetLanguage]][]) {
+			menu.addItem((item) => item.setTitle(`Copy as ${label}`).onClick(() => void copySnippet(language)));
+		}
+		menu.showAtMouseEvent(e);
 	}
 
 	function toggleOrientation() {
@@ -352,7 +362,7 @@
 		{:else}
 			<span class="carbonwire-env-badge is-none">No environment</span>
 		{/if}
-		<button class="clickable-icon" aria-label="Copy as cURL" onclick={() => void copyCurl()} use:icon={"code-xml"}></button>
+		<button class="clickable-icon" aria-label="Copy as cURL or code" onclick={showCopyMenu} use:icon={"code-xml"}></button>
 		<button
 			class="clickable-icon"
 			aria-label={layout.orientation === "vertical" ? "Show response below" : "Show response beside"}

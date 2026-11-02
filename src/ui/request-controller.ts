@@ -1,3 +1,4 @@
+import type { SnippetLanguage } from "../core/export/snippets";
 import type { HttpRequest } from "../core/model";
 import type { SendResult } from "../core/sender";
 import type { SendProgress } from "../core/transport/types";
@@ -16,7 +17,7 @@ export interface RequestController {
 	variableNames(request: HttpRequest): Promise<string[]>;
 	/** Renames the request; resolves to the name actually used, or undefined if it failed. */
 	rename(name: string): Promise<string | undefined>;
-	/** Copies the request, fully resolved, as a cURL command. */
-	copyCurl(request: HttpRequest): Promise<void>;
+	/** Copies the request, fully resolved, as a cURL command or code in another language. */
+	copySnippet(request: HttpRequest, language: SnippetLanguage): Promise<void>;
 	notify(message: string): void;
 }

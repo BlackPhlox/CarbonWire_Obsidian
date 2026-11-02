@@ -243,6 +243,13 @@ export class CollectionsView extends ItemView {
 						await plugin.copyCurl(path, await plugin.store.loadRequest(path));
 					}),
 				);
+				menu.addItem((item) =>
+					item.setTitle("Copy as code…").setIcon("code-xml").onClick(async () => {
+						const { pickSnippetLanguage } = await import("./snippet-picker");
+						const language = await pickSnippetLanguage(plugin.app);
+						if (language) await plugin.copySnippet(path, await plugin.store.loadRequest(path), language);
+					}),
+				);
 				menu.addSeparator();
 				menu.addItem((item) => item.setTitle("Delete").setIcon("trash").setWarning(true).onClick(() => void actions.deleteRequest(path)));
 				break;

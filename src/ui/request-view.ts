@@ -181,7 +181,7 @@ export class RequestView extends ItemView {
 				const target = await plugin.actions.renameRequest(this.path, name);
 				return target ? stem(target) : undefined;
 			},
-			copyCurl: (next) => plugin.copyCurl(this.path, next),
+			copySnippet: (next, language) => plugin.copySnippet(this.path, next, language),
 			notify: (message) => new Notice(message),
 		};
 		this.editor = mount(RequestEditor, {

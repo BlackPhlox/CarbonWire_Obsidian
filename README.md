@@ -24,7 +24,7 @@
 - Any method, query and path parameters, headers, and JSON, XML, text, form, multipart or file bodies
 - `{{variables}}` everywhere, shown in blue when defined and red when not, plus dynamic values like `{{$guid}}` and `{{$timestamp}}`
 - Auth: Basic, Bearer token, API key, Digest and OAuth 2.0 (client credentials and password)
-- Paste a curl command into the URL bar and the whole request fills in. Copy any request back out as curl.
+- Paste a curl command into the URL bar and the whole request fills in. Copy any request back out as curl, C# (HttpClient), Python (requests), JavaScript (fetch) or PowerShell, with variables and auth filled in.
 - Start a request in a new tab without saving it, then save it to a collection when you want to keep it
 
 **Responses**
@@ -122,7 +122,7 @@ CarbonWire needs Obsidian 1.11.4 or later, on desktop.
 - [ ] Pre-request and test scripts, with a collection runner
 - [ ] Cookies, proxies and client certificates
 - [ ] OAuth 2.0 authorization code with PKCE
-- [ ] Code snippets for other languages
+- [x] Code snippets for other languages
 - [ ] Mobile support
 
 ## Development

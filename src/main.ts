@@ -3,6 +3,7 @@ import type { OAuth2Tokens } from "./core/auth/oauth2";
 import type { HttpRequest } from "./core/model";
 import { buildRequest } from "./core/request-builder";
 import { environmentSecretId } from "./core/secrets";
+import type { SnippetLanguage } from "./core/export/snippets";
 import type { SendResult } from "./core/sender";
 import { insertKey, type SortOrder } from "./core/storage/order";
 import { dirname, joinPath, stem } from "./core/storage/paths";
@@ -367,22 +368,26 @@ export default class CarbonWirePlugin extends Plugin {
 		}
 	}
 
-	/**
-	 * Copies the request as cURL with variables, inherited auth and OAuth 2.0 tokens resolved,
-	 * as it would be sent. Body file paths become absolute so the command runs anywhere.
-	 */
 	async copyCurl(path: string | undefined, request: HttpRequest): Promise<void> {
+		await this.copySnippet(path, request, "curl");
+	}
+
+	/**
+	 * Copies the request as code, with variables, inherited auth and OAuth 2.0 tokens resolved,
+	 * as it would be sent. Body file paths become absolute so the code runs anywhere.
+	 */
+	async copySnippet(path: string | undefined, request: HttpRequest, language: SnippetLanguage): Promise<void> {
 		try {
-			const [{ requestScope, withOAuth2 }, { toCurl }, oauth2] = await Promise.all([import("./core/sender"), import("./core/export/curl"), this.getOAuth2()]);
+			const [{ requestScope, withOAuth2 }, { toSnippet, SNIPPETS }, oauth2] = await Promise.all([import("./core/sender"), import("./core/export/snippets"), this.getOAuth2()]);
 			const { root, context, scope } = await this.scopeFor(path, request, requestScope);
 			const resolved = await withOAuth2(buildRequest(request, context.chain, scope), oauth2, { rejectUnauthorized: this.settings.rejectUnauthorized });
 			const adapter = this.app.vault.adapter;
 			const base = adapter instanceof FileSystemAdapter ? adapter.getBasePath() : "";
 			const absolute = (file: string) => (/^(\/|[A-Za-z]:[\\/])/.test(file) ? file : `${base}/${joinPath(root, file)}`);
-			await navigator.clipboard.writeText(toCurl(resolved, { filePath: absolute, insecure: !this.settings.rejectUnauthorized }));
-			new Notice("Copied as cURL.");
+			await navigator.clipboard.writeText(toSnippet(language, resolved, { filePath: absolute, insecure: !this.settings.rejectUnauthorized }));
+			new Notice(`Copied as ${SNIPPETS[language].label}.`);
 		} catch (e) {
-			new Notice(`Couldn't copy as cURL: ${e instanceof Error ? e.message : String(e)}`);
+			new Notice(`Couldn't copy the request: ${e instanceof Error ? e.message : String(e)}`);
 		}
 	}
 
