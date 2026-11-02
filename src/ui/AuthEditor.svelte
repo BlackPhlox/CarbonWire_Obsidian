@@ -83,13 +83,23 @@
 			<select class="dropdown" value={auth.flow} onchange={(e) => setOAuth({ flow: e.currentTarget.value } as Partial<AuthOAuth2>)}>
 				<option value="client_credentials">Client credentials</option>
 				<option value="resource_owner_password_credentials">Password</option>
-				{#if auth.flow === "authorization_code" || auth.flow === "implicit"}<option value={auth.flow}>{auth.flow} (not supported yet)</option>{/if}
+				<option value="authorization_code">Authorization code (browser sign-in)</option>
+				{#if auth.flow === "implicit"}<option value={auth.flow}>{auth.flow} (not supported)</option>{/if}
 			</select>
 		</label>
-		{#if auth.flow === "client_credentials" || auth.flow === "resource_owner_password_credentials"}
+		{#if auth.flow === "client_credentials" || auth.flow === "resource_owner_password_credentials" || auth.flow === "authorization_code"}
+			{#if auth.flow === "authorization_code"}
+				{@const code = auth}
+				<label class="carbonwire-field"><span>Authorization URL</span><VarInput value={code.authorizationUrl ?? ""} oninput={(v) => setOAuth({ authorizationUrl: v } as Partial<AuthOAuth2>)} /></label>
+				<label class="carbonwire-field">
+					<span>Callback URL</span>
+					<VarInput value={code.callbackUrl ?? ""} placeholder="http://localhost (any free port)" oninput={(v) => setOAuth({ callbackUrl: v } as Partial<AuthOAuth2>)} />
+					<small class="carbonwire-muted">Register this as a redirect URI with the provider. With http://localhost, CarbonWire receives the code itself; with any other address, you paste the address the browser lands on.</small>
+				</label>
+			{/if}
 			<label class="carbonwire-field"><span>Access token URL</span><VarInput value={auth.accessTokenUrl ?? ""} oninput={(v) => setOAuth({ accessTokenUrl: v })} /></label>
 			<label class="carbonwire-field"><span>Client ID</span><VarInput value={auth.credentials?.clientId ?? ""} oninput={(v) => setCredentials("clientId", v)} /></label>
-			<label class="carbonwire-field"><span>Client secret</span><input type="password" value={auth.credentials?.clientSecret ?? ""} oninput={(e) => setCredentials("clientSecret", e.currentTarget.value)} /></label>
+			<label class="carbonwire-field"><span>{auth.flow === "authorization_code" ? "Client secret (leave empty for a public client)" : "Client secret"}</span><input type="password" value={auth.credentials?.clientSecret ?? ""} oninput={(e) => setCredentials("clientSecret", e.currentTarget.value)} /></label>
 			<label class="carbonwire-field">
 				<span>Send client credentials</span>
 				<select class="dropdown" value={auth.credentials?.placement ?? "basic_auth_header"} onchange={(e) => setCredentials("placement", e.currentTarget.value)}>
@@ -103,6 +113,24 @@
 				<label class="carbonwire-field"><span>Password</span><input type="password" value={owner?.password ?? ""} oninput={(e) => setOAuth({ resourceOwner: { ...owner, password: e.currentTarget.value } } as Partial<AuthOAuth2>)} /></label>
 			{/if}
 			<label class="carbonwire-field"><span>Scope</span><VarInput value={auth.scope ?? ""} oninput={(v) => setOAuth({ scope: v })} /></label>
+			{#if auth.flow === "authorization_code"}
+				{@const pkce = auth.pkce}
+				<label class="carbonwire-field">
+					<span>PKCE</span>
+					<select
+						class="dropdown"
+						value={pkce?.disabled ? "off" : (pkce?.method ?? "S256")}
+						onchange={(e) => {
+							const v = e.currentTarget.value;
+							setOAuth({ pkce: v === "off" ? { disabled: true } : { method: v as "S256" | "plain" } } as Partial<AuthOAuth2>);
+						}}
+					>
+						<option value="S256">SHA-256 (recommended)</option>
+						<option value="plain">Plain</option>
+						<option value="off">Off</option>
+					</select>
+				</label>
+			{/if}
 			<label class="carbonwire-field">
 				<span>Send token in</span>
 				<select class="dropdown" value={placement && "query" in placement ? "query" : "header"} onchange={(e) => setPlacement(e.currentTarget.value as "header" | "query", e.currentTarget.value === "query" ? "access_token" : "Bearer")}>

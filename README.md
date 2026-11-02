@@ -23,7 +23,7 @@
 **Requests**
 - Any method, query and path parameters, headers, and JSON, XML, text, form, multipart or file bodies
 - `{{variables}}` everywhere, shown in blue when defined and red when not, plus dynamic values like `{{$guid}}` and `{{$timestamp}}`
-- Auth: Basic, Bearer token, API key, Digest and OAuth 2.0 (client credentials and password)
+- Auth: Basic, Bearer token, API key, Digest and OAuth 2.0 (authorization code with PKCE, client credentials and password)
 - Paste a curl command into the URL bar and the whole request fills in. Copy any request back out as curl.
 - Start a request in a new tab without saving it, then save it to a collection when you want to keep it
 
@@ -116,7 +116,7 @@ Your account needs the **Key Vault Secrets User** role on the vault (or a *Get* 
 | Save an unsaved request | `Ctrl/Cmd + S` |
 | Find in the response or body | `Ctrl/Cmd + F` |
 
-Commands in the palette: **Open collections**, **New request**, **Import collection, environment or cURL**, **Send request**, **Sign in to Microsoft for Azure Key Vault**, **Sign out of Microsoft**, **Copy Azure Key Vault secret reference** and **Forget fetched Azure Key Vault secrets**. Assign your own hotkeys to any of them.
+Commands in the palette: **Open collections**, **New request**, **Import collection, environment or cURL**, **Send request**, **Sign in to Microsoft for Azure Key Vault**, **Sign out of Microsoft**, **Copy Azure Key Vault secret reference**, **Forget fetched Azure Key Vault secrets** and **Forget OAuth 2.0 tokens**. Assign your own hotkeys to any of them.
 
 ## Settings
 
@@ -143,7 +143,7 @@ CarbonWire needs Obsidian 1.11.4 or later, on desktop.
 
 ## Privacy and network use
 
-- CarbonWire sends requests only to the URLs you enter, and only when you send them. For OAuth 2.0 it also calls the token URL you set, including when you copy a request as curl.
+- CarbonWire sends requests only to the URLs you enter, and only when you send them. For OAuth 2.0 it also calls the token URL you set, including when you copy a request as curl. The authorization code flow opens the authorization URL in your browser and, for an http://localhost callback URL, briefly listens on that port for the code. OAuth 2.0 tokens stay in memory until Obsidian closes or you run **Forget OAuth 2.0 tokens**.
 - There's no telemetry and no account. Microsoft sign-in is optional and only used for Azure Key Vault.
 - With the Azure CLI option, CarbonWire runs `az account get-access-token` (and `az account show` when you select **Check**) and keeps only the short-lived access token, in memory.
 - When you sign in, CarbonWire talks to login.microsoftonline.com and briefly listens on a random localhost port for the browser to return. The sign-in (a refresh token) is kept in Obsidian's secret storage on this device, never in your vault. It's tied to the tenant and client ID in settings; change either and you sign in again.
@@ -163,7 +163,7 @@ CarbonWire needs Obsidian 1.11.4 or later, on desktop.
 - [ ] OpenAPI import
 - [ ] Pre-request and test scripts, with a collection runner
 - [ ] Cookies, proxies and client certificates
-- [ ] OAuth 2.0 authorization code with PKCE
+- [x] OAuth 2.0 authorization code with PKCE
 - [ ] Code snippets for other languages
 - [ ] Mobile support
 

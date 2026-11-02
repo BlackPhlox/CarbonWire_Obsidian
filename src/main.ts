@@ -118,6 +118,14 @@ export default class CarbonWirePlugin extends Plugin {
 			callback: () => void this.pickKeyVaultSecret(),
 		});
 		this.addCommand({
+			id: "clear-oauth2-tokens",
+			name: "Forget OAuth 2.0 tokens",
+			callback: () => {
+				this.oauth2?.clear();
+				new Notice("OAuth 2.0 tokens were cleared. The next request gets a new one.");
+			},
+		});
+		this.addCommand({
 			id: "clear-key-vault-cache",
 			name: "Forget fetched Azure Key Vault secrets",
 			callback: () => {
@@ -597,8 +605,8 @@ export default class CarbonWirePlugin extends Plugin {
 
 	private async getOAuth2(): Promise<OAuth2Tokens> {
 		if (!this.oauth2) {
-			const { OAuth2Tokens } = await import("./core/auth/oauth2");
-			this.oauth2 = new OAuth2Tokens(await this.getTransport());
+			const [{ OAuth2Tokens }, { createAuthorizer }] = await Promise.all([import("./core/auth/oauth2"), import("./ui/oauth2-authorize")]);
+			this.oauth2 = new OAuth2Tokens(await this.getTransport(), createAuthorizer(this.app));
 		}
 		return this.oauth2;
 	}
