@@ -1,0 +1,128 @@
+# Azure Pipelines steps template: converts an OpenAPI document into an OpenCollection
+# folder that CarbonWire (and Bruno) open as a collection.
+#
+# Every run writes the whole collection again from the spec: the output directory is
+# replaced, so edits made to generated requests are not kept.
+#
+# Use it from a job:
+#
+#   steps:
+#     - template: openapi-to-opencollection.yml
+#       parameters:
+#         openApiSource: $(Build.ArtifactStagingDirectory)/openapi/TodoApi.json
+#         collectionName: Todo API
+#         outputDirectory: $(Build.ArtifactStagingDirectory)/collection
+
+parameters:
+  # Path to an OpenAPI 3.x document (JSON or YAML), or an https URL.
+  - name: openApiSource
+    type: string
+  # Shown as the collection's name in CarbonWire.
+  - name: collectionName
+    type: string
+  # Where the collection folder is written. Replaced on every run.
+  - name: outputDirectory
+    type: string
+  # Folders by OpenAPI tag (usually one per controller) or by URL path.
+  - name: groupBy
+    type: string
+    default: tags
+    values:
+      - tags
+      - path
+  # Servers with a description become environments named after it. Servers without one
+  # would be called "Environment 1", "Environment 2"...; they get this name instead
+  # (numbered when there are several). Defaults to the collection name.
+  - name: environmentName
+    type: string
+    default: ''
+  # Also copy the OpenAPI document into the collection folder, for people reading the repo.
+  - name: includeSpec
+    type: boolean
+    default: true
+  - name: bruCliVersion
+    type: string
+    default: '4.3.0'
+  - name: nodeVersion
+    type: string
+    default: '22.x'
+
+steps:
+  - task: NodeTool@0
+    displayName: Use Node.js ${{ parameters.nodeVersion }}
+    inputs:
+      versionSpec: ${{ parameters.nodeVersion }}
+
+  - script: npm install --global --no-audit --no-fund "@usebruno/cli@${{ parameters.bruCliVersion }}"
+    displayName: Install Bruno CLI ${{ parameters.bruCliVersion }}
+
+  # Parameters reach the script as environment variables, never pasted into its text.
+  - bash: |
+      set -euo pipefail
+
+      if [ -z "$OUTPUT_DIR" ] || [ "$OUTPUT_DIR" = "/" ]; then
+        echo "##vso[task.logissue type=error]outputDirectory must be a folder of its own."
+        exit 1
+      fi
+
+      work="$(mktemp -d)"
+      trap 'rm -rf "$work"' EXIT
+
+      bru import openapi \
+        --source "$OPENAPI_SOURCE" \
+        --output "$work/collection" \
+        --collection-name "$COLLECTION_NAME" \
+        --collection-format opencollection \
+        --group-by "$GROUP_BY"
+
+      if [ ! -f "$work/collection/opencollection.yml" ]; then
+        echo "##vso[task.logissue type=error]Bruno CLI didn't write an OpenCollection folder."
+        exit 1
+      fi
+
+      # Give environments from servers without a description a useful name, since
+      # CarbonWire's environments are shared by every collection.
+      env_name="${ENVIRONMENT_NAME:-$COLLECTION_NAME}"
+      if [ -d "$work/collection/environments" ]; then
+        node - "$work/collection/environments" "$env_name" <<'NODE'
+      const fs = require("node:fs");
+      const path = require("node:path");
+      const [dir, base] = process.argv.slice(2);
+      const generic = fs.readdirSync(dir).filter((f) => /^Environment \d+\.ya?ml$/.test(f)).sort();
+      const safe = base.replace(/[\\/:*?"<>|#^[\]]/g, "-").trim() || "Environment";
+      generic.forEach((file, i) => {
+        const name = generic.length === 1 ? safe : `${safe} ${i + 1}`;
+        const text = fs.readFileSync(path.join(dir, file), "utf8").replace(/^name: .*$/m, `name: ${JSON.stringify(name)}`);
+        fs.rmSync(path.join(dir, file));
+        fs.writeFileSync(path.join(dir, `${name}.yml`), text);
+        console.log(`Environment "${file}" -> "${name}.yml"`);
+      });
+      NODE
+      fi
+
+      if [ "$(echo "$INCLUDE_SPEC" | tr "[:upper:]" "[:lower:]")" = "true" ]; then
+        case "$OPENAPI_SOURCE" in
+          https://*|http://*)
+            ext="json"
+            case "$OPENAPI_SOURCE" in *.yaml|*.yml) ext="yaml" ;; esac
+            curl --fail --silent --show-error --location "$OPENAPI_SOURCE" --output "$work/collection/openapi.$ext" ;;
+          *)
+            ext="${OPENAPI_SOURCE##*.}"
+            cp "$OPENAPI_SOURCE" "$work/collection/openapi.$ext" ;;
+        esac
+      fi
+
+      rm -rf "$OUTPUT_DIR"
+      mkdir -p "$(dirname "$OUTPUT_DIR")"
+      mv "$work/collection" "$OUTPUT_DIR"
+
+      requests=$(find "$OUTPUT_DIR" -name '*.yml' ! -name opencollection.yml ! -name folder.yml ! -path '*/environments/*' | wc -l)
+      echo "Wrote \"$COLLECTION_NAME\" with $requests requests to $OUTPUT_DIR"
+    displayName: Convert OpenAPI to OpenCollection
+    env:
+      OPENAPI_SOURCE: ${{ parameters.openApiSource }}
+      COLLECTION_NAME: ${{ parameters.collectionName }}
+      OUTPUT_DIR: ${{ parameters.outputDirectory }}
+      GROUP_BY: ${{ parameters.groupBy }}
+      ENVIRONMENT_NAME: ${{ parameters.environmentName }}
+      INCLUDE_SPEC: ${{ parameters.includeSpec }}

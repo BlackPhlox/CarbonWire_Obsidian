@@ -1,0 +1,152 @@
+# Example pipeline: builds an ASP.NET Core API, converts its OpenAPI document into a
+# CarbonWire collection, and replaces that collection in another repo, such as a wiki repo
+# opened as an Obsidian vault.
+#
+# Copy this file and openapi-to-opencollection.yml into the API's repo, side by side, and
+# adjust the parameters and the `wiki` repository below.
+#
+# The API project needs build-time OpenAPI generation:
+#   dotnet add package Microsoft.Extensions.ApiDescription.Server
+# Or set `openApiSource` to a committed spec file or a URL and leave `dotnetProject` empty.
+#
+# The pipeline's build identity ("<Project> Build Service (<Organization>)") needs the
+# Contribute permission on the target repo, in Project settings → Repositories → <repo> →
+# Security.
+
+trigger:
+  branches:
+    include:
+      - main
+  paths:
+    exclude:
+      - '**/*.md'
+
+parameters:
+  # The API project that produces the OpenAPI document at build time. Empty to skip building.
+  - name: dotnetProject
+    type: string
+    default: src/TodoApi/TodoApi.csproj
+  - name: dotnetVersion
+    type: string
+    default: '10.x'
+  # A spec file or URL to use instead of building. With dotnetProject set and this empty,
+  # the document the build writes is used (one .json file; set this when there are several).
+  - name: openApiSource
+    type: string
+    default: ' '
+  - name: collectionName
+    type: string
+    default: Todo API
+  # Folder in the target repo that holds the collection. Replaced completely on every run.
+  - name: targetPath
+    type: string
+    default: API/Todo API
+  - name: targetBranch
+    type: string
+    default: main
+  # Push to the target repo, or only publish the collection as a build artifact.
+  - name: pushToTarget
+    type: boolean
+    default: true
+
+resources:
+  repositories:
+    # The repo the collection is synced into. For a repo in Azure Repos:
+    - repository: wiki
+      type: git
+      name: MyProject/MyWiki
+      ref: refs/heads/main
+    # For a GitHub repo, use instead:
+    #   type: github
+    #   name: my-org/my-wiki
+    #   endpoint: my-github-service-connection
+
+variables:
+  specDir: $(Build.ArtifactStagingDirectory)/openapi
+  collectionDir: $(Build.ArtifactStagingDirectory)/collection
+
+pool:
+  vmImage: ubuntu-latest
+
+steps:
+  - checkout: self
+    path: api
+
+  - ${{ if ne(trim(parameters.dotnetProject), '') }}:
+      - task: UseDotNet@2
+        displayName: Use .NET SDK ${{ parameters.dotnetVersion }}
+        inputs:
+          packageType: sdk
+          version: ${{ parameters.dotnetVersion }}
+
+      - script: >
+          dotnet build "$(Agent.BuildDirectory)/api/${{ parameters.dotnetProject }}"
+          --configuration Release
+          -p:OpenApiGenerateDocuments=true
+          "-p:OpenApiDocumentsDirectory=$(specDir)"
+        displayName: Build the API and generate its OpenAPI document
+
+  - bash: |
+      set -euo pipefail
+      source="$(echo "$OPENAPI_SOURCE" | xargs)"
+      if [ -z "$source" ]; then
+        mapfile -t specs < <(find "$SPEC_DIR" -maxdepth 1 -name '*.json' 2>/dev/null | sort)
+        if [ "${#specs[@]}" -ne 1 ]; then
+          echo "##vso[task.logissue type=error]Expected one OpenAPI document in $SPEC_DIR, found ${#specs[@]}. Set openApiSource."
+          exit 1
+        fi
+        source="${specs[0]}"
+      elif [ -e "$(Agent.BuildDirectory)/api/$source" ]; then
+        source="$(Agent.BuildDirectory)/api/$source"
+      fi
+      echo "Using $source"
+      echo "##vso[task.setvariable variable=openApiFile]$source"
+    displayName: Find the OpenAPI document
+    env:
+      OPENAPI_SOURCE: ${{ parameters.openApiSource }}
+      SPEC_DIR: $(specDir)
+
+  - template: openapi-to-opencollection.yml
+    parameters:
+      openApiSource: $(openApiFile)
+      collectionName: ${{ parameters.collectionName }}
+      outputDirectory: $(collectionDir)
+
+  - publish: $(collectionDir)
+    artifact: collection
+    displayName: Publish the collection
+
+  - ${{ if eq(parameters.pushToTarget, true) }}:
+      - checkout: wiki
+        path: wiki
+        persistCredentials: true
+        clean: true
+
+      # Full sync: the target folder ends up exactly like the generated collection.
+      - bash: |
+          set -euo pipefail
+          target="$(echo "$TARGET_PATH" | sed 's#^/*##; s#/*$##')"
+          if [ -z "$target" ] || [ "$target" = "." ] || [[ "$target" == *..* ]]; then
+            echo "##vso[task.logissue type=error]targetPath must be a folder inside the repo."
+            exit 1
+          fi
+          cd "$(Agent.BuildDirectory)/wiki"
+          rm -rf -- "$target"
+          mkdir -p -- "$(dirname -- "$target")"
+          cp -R "$COLLECTION_DIR" "$target"
+          git add --all -- "$target"
+          if git diff --cached --quiet; then
+            echo "The collection hasn't changed."
+            exit 0
+          fi
+          git -c user.name="Azure Pipelines" -c user.email="azure-pipelines@users.noreply.dev.azure.com" \
+            commit --quiet -m "Sync $COLLECTION_NAME collection from OpenAPI ***NO_CI***" \
+            -m "From $(Build.Repository.Name) at $(Build.SourceVersion), build $(Build.BuildNumber)."
+          git push origin "HEAD:$TARGET_BRANCH"
+          git show --stat --oneline HEAD
+        displayName: Replace the collection in the target repo
+        env:
+          TARGET_PATH: ${{ parameters.targetPath }}
+          TARGET_BRANCH: ${{ parameters.targetBranch }}
+          COLLECTION_DIR: $(collectionDir)
+          COLLECTION_NAME: ${{ parameters.collectionName }}

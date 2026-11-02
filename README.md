@@ -75,6 +75,17 @@ Median times on an Intel Core i5-1135G7 laptop with Node 24. Run `npm run bench`
 
 <p align="center"><img src="assets/import.png" alt="Import dialog detecting a Postman collection" width="600"></p>
 
+## Generate a collection from OpenAPI in Azure Pipelines
+
+[`ci/azure-pipelines`](ci/azure-pipelines) turns an API's OpenAPI document into a CarbonWire collection on every build, and can commit it to another repo, such as a wiki repo you open as a vault.
+
+- [`openapi-to-opencollection.yml`](ci/azure-pipelines/openapi-to-opencollection.yml) is a steps template. It converts an OpenAPI 3.x file or URL into an OpenCollection folder with the [Bruno CLI](https://docs.usebruno.com/bru-cli/import), the same YAML format CarbonWire stores collections in. Folders follow the spec's tags (usually one per controller), the spec's servers become environments with a `baseUrl` variable, and its security becomes the collection's auth.
+- [`openapi-sync.example.yml`](ci/azure-pipelines/openapi-sync.example.yml) is a full pipeline for an ASP.NET Core API: build the project with build-time OpenAPI generation (`Microsoft.Extensions.ApiDescription.Server`), convert, publish the collection as a build artifact, and replace a folder in the target repo with it. It commits only when something changed, with `***NO_CI***` so the target repo's own pipelines don't run.
+
+Copy both files into the API's repo, set the project, collection name, target repo and folder, and give the pipeline's build service **Contribute** on the target repo.
+
+Every run regenerates the whole collection, so changes made to generated requests in the target repo are replaced. Keep your own requests in another collection, and your environments, with their secrets, in CarbonWire's environments folder.
+
 ## Keyboard shortcuts
 
 | Action | Shortcut |
