@@ -79,7 +79,7 @@ const TEXT = {
 	account: ["Microsoft account", "Sign in to read secrets from Azure Key Vault with {{$keyvault:vault/secret}} variables. The sign-in is kept in Obsidian's secret storage on this device."],
 	tenant: ["Tenant", "Directory (tenant) ID or domain, such as contoso.onmicrosoft.com. Use organizations for any work or school account, or, with the Azure CLI, for its current tenant."],
 	clientId: ["Client ID", "Only for Microsoft sign-in. Application (client) ID to sign in with. The default is Microsoft's public Azure CLI app, which already has Key Vault access. Use your own app registration if your organization blocks it."],
-	defaultVault: ["Default vault", "Vault name or URL used by {{$keyvault:secret}} when the reference doesn't name a vault."],
+	defaultVault: ["Default vault", "Vault name or URL used by {{$keyvault:secret}} when the reference doesn't name a vault and the active environment has no default vault of its own."],
 	cache: ["Keep secrets in memory", "In minutes. Fetched values are never written to disk. Set to 0 to fetch on every send."],
 } as const;
 

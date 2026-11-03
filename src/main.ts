@@ -339,6 +339,15 @@ export default class CarbonWirePlugin extends Plugin {
 		}
 	}
 
+	/** The vault `{{$keyvault:secret}}` reads from with the active environment. */
+	async activeDefaultVault(): Promise<string> {
+		const name = this.activeEnvironment();
+		const path = name ? this.environments().find((p) => stem(p) === name) : undefined;
+		const environment = path ? ((await this.store.loadEnvironment(path)) as { keyVault?: unknown }) : undefined;
+		const { defaultVault } = await import("./core/azure/keyvault");
+		return defaultVault(environment, this.settings.keyVaultDefault);
+	}
+
 	onMicrosoftAccountChanged(callback: () => void): () => void {
 		const ref = this.events.on("microsoft-account-changed", callback);
 		return () => this.events.offref(ref);
@@ -351,7 +360,8 @@ export default class CarbonWirePlugin extends Plugin {
 	/** Lists a vault's secrets and copies the chosen one as a {{$keyvault:...}} variable. */
 	async pickKeyVaultSecret(): Promise<void> {
 		const [{ promptText }, { pickKeyVaultSecret }] = await Promise.all([import("./ui/prompt"), import("./ui/keyvault-picker")]);
-		const vault = this.settings.keyVaultDefault.trim() || (await promptText(this.app, "Key Vault name or URL", "contoso", "", "List secrets"));
+		const fallback = await this.activeDefaultVault();
+		const vault = fallback || (await promptText(this.app, "Key Vault name or URL", "contoso", "", "List secrets"));
 		if (!vault) return;
 		try {
 			const keyVault = await this.getKeyVault();
@@ -362,7 +372,7 @@ export default class CarbonWirePlugin extends Plugin {
 			}
 			const name = await pickKeyVaultSecret(this.app, vault, names);
 			if (!name) return;
-			const isDefault = vault === this.settings.keyVaultDefault.trim();
+			const isDefault = vault === fallback;
 			const reference = `{{$keyvault:${isDefault ? "" : `${vault}/`}${name}}}`;
 			await navigator.clipboard.writeText(reference);
 			new Notice(`Copied ${reference}. Paste it into a request or an environment variable.`);
@@ -537,7 +547,9 @@ export default class CarbonWirePlugin extends Plugin {
 		const variables = resolveEnvironment(environment, (variable) => (environmentPath ? this.secretFor(environmentPath, variable) : null));
 		const scope = requestScope(context, request, variables);
 		if (!keyVault) return { root, context, scope };
-		return { root, context, scope: await this.withKeyVaultSecrets(scope, request, context.chain, keyVault) };
+		const { defaultVault } = await import("./core/azure/keyvault");
+		const vault = defaultVault(environment as { keyVault?: unknown } | undefined, this.settings.keyVaultDefault);
+		return { root, context, scope: await this.withKeyVaultSecrets(scope, request, context.chain, vault, keyVault) };
 	}
 
 	/**
@@ -548,6 +560,7 @@ export default class CarbonWirePlugin extends Plugin {
 		scope: ReadonlyMap<string, string>,
 		request: HttpRequest,
 		chain: DefaultsChain,
+		vault: string,
 		options: { signal?: AbortSignal; onProgress?: (progress: SendProgress) => void },
 	): Promise<ReadonlyMap<string, string>> {
 		const { usedKeyVaultVariables } = await import("./core/azure/keyvault");
@@ -555,7 +568,7 @@ export default class CarbonWirePlugin extends Plugin {
 		if (!names.size) return scope;
 		options.onProgress?.({ phase: "authorizing" });
 		const keyVault = await this.getKeyVault();
-		const secrets = await keyVault.resolve(names, this.settings.keyVaultDefault, options.signal);
+		const secrets = await keyVault.resolve(names, vault, options.signal);
 		return new Map([...scope, ...secrets]);
 	}
 

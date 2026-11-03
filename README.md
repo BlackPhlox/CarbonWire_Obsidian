@@ -91,11 +91,11 @@ Median times on an Intel Core i5-1135G7 laptop with Node 24. Run `npm run bench`
 |---|---|
 | `{{$keyvault:contoso/db-password}}` | The latest `db-password` in the `contoso` vault |
 | `{{$keyvault:contoso/db-password/4f2a…}}` | A specific version |
-| `{{$keyvault:db-password}}` | `db-password` in the default vault from settings |
+| `{{$keyvault:db-password}}` | `db-password` in the active environment's default vault, or else the one from settings |
 | `{{$keyvault:contoso.vault.azure.cn/db-password}}` | A vault in another Azure cloud, by host name |
 | `{{$keyvault:https://contoso.vault.azure.net/secrets/db-password}}` | The secret identifier as the Azure portal shows it |
 
-To use a different vault per environment, give each environment a variable such as `dbPassword: {{$keyvault:contoso-dev/db-password}}` and use `{{dbPassword}}` in your requests. Only the secrets a request actually uses are fetched.
+To use a different vault per environment, set **Default Key Vault** in each environment, such as `contoso-dev` and `contoso-prod`. Then `{{$keyvault:db-password}}` reads from the active environment's vault. It's saved as `keyVault:` in the environment file. You can also give an environment a variable such as `dbPassword: {{$keyvault:contoso-dev/db-password}}` and use `{{dbPassword}}` in your requests. Only the secrets a request actually uses are fetched.
 
 Run **Copy Azure Key Vault secret reference** to pick a secret from a vault's list and copy its reference.
 
@@ -132,7 +132,7 @@ Commands in the palette: **Open collections**, **New request**, **Import collect
 | Azure CLI path | Empty | Full path to `az`, if it isn't found on its own. |
 | Tenant | `organizations` | Entra ID tenant ID or domain to sign in to. `organizations` accepts any work or school account. |
 | Client ID | Azure CLI app | App (client) ID used for Microsoft sign-in. |
-| Default vault | Empty | Vault used by `{{$keyvault:secret}}` references that don't name one. |
+| Default vault | Empty | Vault used by `{{$keyvault:secret}}` references that don't name one, unless the active environment sets its own. |
 | Keep secrets in memory | 5 minutes | How long fetched Key Vault values are reused. 0 fetches on every send. |
 
 ## Install

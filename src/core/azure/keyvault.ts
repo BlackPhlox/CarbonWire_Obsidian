@@ -64,6 +64,15 @@ export function parseKeyVaultReference(variable: string, defaultVault = ""): Key
 	return version ? { vault, name, version } : { vault, name };
 }
 
+/**
+ * The vault for references that don't name one: the active environment's `keyVault`, a
+ * CarbonWire field in the environment file, then the one in settings.
+ */
+export function defaultVault(environment: { keyVault?: unknown } | undefined, fromSettings: string): string {
+	const own = typeof environment?.keyVault === "string" ? environment.keyVault.trim() : "";
+	return own || fromSettings.trim();
+}
+
 /** `https://contoso.vault.azure.net` for a bare name; a host or URL is kept as given. */
 export function vaultUrl(vault: string): string {
 	const trimmed = vault.trim().replace(/\/+$/, "");
@@ -156,7 +165,7 @@ export class KeyVaultClient {
 			[...new Set(variables)].map(async (variable) => {
 				const ref = parseKeyVaultReference(variable, defaultVault);
 				if (!ref) {
-					const hint = variable.includes("/") ? "" : " Set a default vault in CarbonWire settings, or write {{$keyvault:vault/secret}}.";
+					const hint = variable.includes("/") ? "" : " Set a default vault on the environment or in CarbonWire settings, or write {{$keyvault:vault/secret}}.";
 					throw new KeyVaultError(`"{{${variable}}}" isn't a valid Key Vault reference.${hint}`);
 				}
 				out.set(variable, await this.getSecret(ref, signal));

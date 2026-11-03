@@ -99,6 +99,7 @@ export class SettingsView extends ItemView {
 				getSecret: (variable: string) => this.plugin.secretFor(path, variable),
 				setSecret: (variable: string, value: string) => this.plugin.setSecretFor(path, variable, value),
 				onSave: save,
+				settingsVault: this.plugin.settings.keyVaultDefault.trim(),
 			},
 		});
 	}

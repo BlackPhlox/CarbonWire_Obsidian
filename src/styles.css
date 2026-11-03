@@ -1083,3 +1083,7 @@ input.carbonwire-title-input:focus {
 	background: var(--background-secondary);
 	user-select: all;
 }
+
+.carbonwire-env-vault {
+	margin-bottom: var(--size-4-3);
+}

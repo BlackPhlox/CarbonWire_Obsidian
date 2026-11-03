@@ -14,14 +14,25 @@
 		getSecret,
 		setSecret,
 		onSave,
+		settingsVault = "",
 	}: {
-		initial: Environment;
+		/** `keyVault` is CarbonWire's own field: the default vault for {{$keyvault:secret}}. */
+		initial: Environment & { keyVault?: string };
 		/** Renames the environment file; resolves to the name used, or undefined if it failed. */
 		onRename?: (name: string) => Promise<string | undefined>;
 		getSecret: (name: string) => string | null;
 		setSecret: (name: string, value: string) => void;
 		onSave: (env: Environment) => Promise<void>;
+		/** The default vault from CarbonWire settings, used when the environment sets none. */
+		settingsVault?: string;
 	} = $props();
+
+	function setVault(value: string) {
+		const vault = value.trim();
+		if (vault) env.keyVault = vault;
+		else delete env.keyVault;
+		autosave.schedule();
+	}
 
 	let env = $state(structuredClone(untrack(() => initial)));
 	const rows = $derived(env.variables ?? []);
@@ -106,6 +117,17 @@
 		When active, these variables apply to every collection and override collection variables. Folder and request variables override them.
 		Secret values are stored in Obsidian's secret storage on this device and never written to the vault.
 	</p>
+	<label class="carbonwire-field carbonwire-env-vault">
+		<span>Default Key Vault</span>
+		<input
+			type="text"
+			spellcheck="false"
+			placeholder={settingsVault ? `${settingsVault} (from settings)` : "contoso, or a vault URL"}
+			value={env.keyVault ?? ""}
+			onchange={(e) => setVault(e.currentTarget.value)}
+		/>
+		<small class="carbonwire-muted">While this environment is active, {"{{$keyvault:secret}}"} reads from this vault. Empty uses the default vault from CarbonWire settings.</small>
+	</label>
 	<div class="carbonwire-kv">
 		{#each rows as row, i (i)}
 			{@const secret = isSecret(row)}

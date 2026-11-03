@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import * as http from "node:http";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { accountName, authorizeUrl, AZURE_CLI_CLIENT_ID, createPkce, EntraClient, EntraError, endpointBase, KEY_VAULT_SCOPE, signInScope, type EntraConfig } from "../src/core/azure/entra";
-import { keyVaultVariables, KeyVaultClient, parseKeyVaultReference, usedKeyVaultVariables, vaultUrl } from "../src/core/azure/keyvault";
+import { defaultVault, keyVaultVariables, KeyVaultClient, parseKeyVaultReference, usedKeyVaultVariables, vaultUrl } from "../src/core/azure/keyvault";
 import type { HttpRequest } from "../src/core/model";
 import { buildRequest } from "../src/core/request-builder";
 import type { Transport, TransportRequest, TransportResponse } from "../src/core/transport/types";
@@ -63,6 +63,14 @@ describe("Key Vault references", () => {
 		expect(parseKeyVaultReference("$keyvault:contoso/a/b/c")).toBeUndefined();
 		expect(parseKeyVaultReference("$keyvault:https://contoso.vault.azure.net/keys/k")).toBeUndefined();
 		expect(parseKeyVaultReference("apiKey")).toBeUndefined();
+	});
+
+	it("prefers the active environment's default vault over the one in settings", () => {
+		expect(defaultVault({ keyVault: " contoso-dev " }, "contoso")).toBe("contoso-dev");
+		expect(defaultVault({ keyVault: "" }, "contoso")).toBe("contoso");
+		expect(defaultVault({}, " contoso ")).toBe("contoso");
+		expect(defaultVault(undefined, "")).toBe("");
+		expect(parseKeyVaultReference("$keyvault:api-key", defaultVault({ keyVault: "contoso-prod" }, "contoso"))).toEqual({ vault: "contoso-prod", name: "api-key" });
 	});
 
 	it("builds vault URLs", () => {
